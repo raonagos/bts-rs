@@ -1,6 +1,6 @@
-# BTC: BackTest Candle
+# BTS: BackTest Strategy
 
-**BTC** is a Rust library for backtesting trading strategies on candlestick data. It allows you to test technical indicators, custom strategies, and simulate trading performance on historical or generated data.
+**BTS** is a Rust library for backtesting trading strategies on candlestick data. It allows you to test technical indicators, custom strategies, and simulate trading performance on historical or generated data.
 
 ---
 
