@@ -8,6 +8,21 @@ use anyhow::*;
 use ta::Next;
 use ta::indicators::SimpleMovingAverage;
 
+trait PercentCalculus<Rhs = Self> {
+    fn addpercent(self, rhs: Rhs) -> Self;
+    fn subpercent(self, rhs: Rhs) -> Self;
+}
+
+impl PercentCalculus for f64 {
+    fn addpercent(self, percent: Self) -> Self {
+        self + (self * percent / 100.0)
+    }
+
+    fn subpercent(self, percent: Self) -> Self {
+        self - (self * percent / 100.0)
+    }
+}
+
 fn main() -> Result<()> {
     let items = get_data_from_file("data/btc.json".into())?;
     let candles = items
@@ -23,17 +38,27 @@ fn main() -> Result<()> {
     while let Some(candle) = bt.next() {
         let close = candle.close();
         let output = sma.next(close);
-        let long_limit = output - (output * 5.0 / 100.0);
+        let long_limit = output.subpercent(5.0);
         let high = candle.high();
         let low = candle.low();
 
         if low < long_limit {
-            let quantity = (99.0 * bt.balance() / 100.0) / long_limit;
+            let quantity = (15.0 * bt.balance() / 100.0) / long_limit;
             _ = bt.open_position((PositionSide::Long, long_limit, quantity).into());
         }
 
         if output < high && output > low {
-            _ = bt.close_position(output);
+            let open_positions = bt.open_positions();
+            open_positions
+                .iter()
+                .filter(|p| {
+                    let entry = p.entry_price() * p.quantity();
+                    let profit = p.estimate_profit(output);
+                    entry.addpercent(5.0) < profit
+                })
+                .for_each(|p| {
+                    _ = bt.close_position(p.id(), output);
+                });
         }
     }
 

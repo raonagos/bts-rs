@@ -11,7 +11,7 @@ use anyhow::{Error, Result};
 #[derive(Debug)]
 pub struct Backtest {
     data: Vec<Candle>,
-    position: Option<Position>,
+    positions: Vec<Position>,
     balance: f64,
     index: usize,
     position_history: Vec<PositionEvent>,
@@ -21,7 +21,7 @@ impl Backtest {
     pub fn new(data: Vec<Candle>, initial_balance: f64) -> Self {
         Self {
             data,
-            position: None,
+            positions: Vec::new(),
             balance: initial_balance,
             index: 0,
             position_history: Vec::new(),
@@ -32,19 +32,32 @@ impl Backtest {
         self.balance
     }
 
+    pub fn portfolio_value(&self, current_price: f64) -> f64 {
+        let positions_value: f64 = self
+            .positions
+            .iter()
+            .map(|p| match p.side() {
+                PositionSide::Long => (current_price - p.entry_price()) * p.quantity(),
+                PositionSide::Short => (p.entry_price() - current_price) * p.quantity(),
+            })
+            .sum();
+        self.balance + positions_value
+    }
+
+    pub fn open_positions(&self) -> Vec<Position> {
+        self.positions.clone()
+    }
+
     pub fn position_history(&self) -> Vec<PositionEvent> {
         self.position_history.clone()
     }
 
-    pub fn open_position(&mut self, position: Position) -> Result<()> {
-        if self.position.is_some() {
-            return Err(Error::msg("Already opened"));
-        }
-
+    pub fn open_position(&mut self, position: Position) -> Result<Position> {
         let (side, price, quantity) =
             (position.side(), position.entry_price(), position.quantity());
         let cost = price * quantity;
-        if self.balance < cost {
+
+        if self.balance < 20.0 || self.balance < cost {
             return Err(Error::msg("Unbalanced wallet"));
         }
 
@@ -53,18 +66,21 @@ impl Backtest {
             PositionSide::Short => self.balance += cost,
         }
 
-        self.position = Some(Position::from((side.clone(), price, quantity)));
-        self.position_history.push(PositionEvent::from((
+        let position_evt = PositionEvent::from((
             self.index.saturating_sub(1),
             price,
             PositionEventType::Open(side),
-        )));
+        ));
 
-        Ok(())
+        self.positions.push(position.clone());
+        self.position_history.push(position_evt);
+
+        Ok(position)
     }
 
-    pub fn close_position(&mut self, exit_price: f64) -> Result<f64> {
-        if let Some(position) = self.position.take() {
+    pub fn close_position(&mut self, position_id: u32, exit_price: f64) -> Result<f64> {
+        if let Some(idx) = self.positions.iter().position(|p| p.id() == position_id) {
+            let position = self.positions.remove(idx);
             let value = match position.side() {
                 PositionSide::Long => {
                     let value = exit_price * position.quantity();
@@ -127,15 +143,15 @@ mod tests {
         while let Some(candle) = bt.next() {
             let price = candle.close();
             if _counter == 0 {
-                let result = bt.open_position((Long, price, 1.0).into()); // balance (1000.0) -= 110.0 * 1.0 => 890.0;
+                let result = bt.open_position((18, Long, price, 1.0).into()); // balance (1000.0) -= 110.0 * 1.0 => 890.0;
                 assert!(result.is_ok());
-                assert!(bt.position.is_some());
+                assert!(!bt.positions.is_empty());
                 assert!(bt.balance < balance);
             }
             if _counter == 1 {
-                let result = bt.close_position(price);
+                let result = bt.close_position(18, price);
                 assert!(result.is_ok());
-                assert!(bt.position.is_none());
+                assert!(bt.positions.is_empty());
                 assert!(bt.balance > balance);
             }
             _counter += 1;
@@ -151,15 +167,15 @@ mod tests {
         while let Some(candle) = bt.next() {
             let price = candle.close();
             if _counter == 1 {
-                let result = bt.open_position((Short, price, 1.0).into());
+                let result = bt.open_position((18, Short, price, 1.0).into());
                 assert!(result.is_ok());
-                assert!(bt.position.is_some());
+                assert!(!bt.positions.is_empty());
                 assert!(bt.balance > balance);
             }
             if _counter == 2 {
-                let result = bt.close_position(price);
+                let result = bt.close_position(18, price);
                 assert!(result.is_ok());
-                assert!(bt.position.is_none());
+                assert!(bt.positions.is_empty());
                 assert!(bt.balance > balance);
             }
             _counter += 1;
@@ -175,15 +191,15 @@ mod tests {
         while let Some(candle) = bt.next() {
             let price = candle.close();
             if _counter == 1 {
-                let result = bt.open_position((Long, price, 1.0).into()); // balance (1000.0) -= 110.0 * 1.0 => 890.0;
+                let result = bt.open_position((18, Long, price, 1.0).into()); // balance (1000.0) -= 110.0 * 1.0 => 890.0;
                 assert!(result.is_ok());
-                assert!(bt.position.is_some());
+                assert!(!bt.positions.is_empty());
                 assert!(bt.balance < balance);
             }
             if _counter == 2 {
-                let result = bt.close_position(price);
+                let result = bt.close_position(18, price);
                 assert!(result.is_ok());
-                assert!(bt.position.is_none());
+                assert!(bt.positions.is_empty());
                 assert!(bt.balance < balance);
             }
             _counter += 1;
@@ -199,15 +215,15 @@ mod tests {
         while let Some(candle) = bt.next() {
             let price = candle.close();
             if _counter == 0 {
-                let result = bt.open_position((Short, price, 1.0).into());
+                let result = bt.open_position((18, Short, price, 1.0).into());
                 assert!(result.is_ok());
-                assert!(bt.position.is_some());
+                assert!(!bt.positions.is_empty());
                 assert!(bt.balance > balance);
             }
             if _counter == 1 {
-                let result = bt.close_position(price);
+                let result = bt.close_position(18, price);
                 assert!(result.is_ok());
-                assert!(bt.position.is_none());
+                assert!(bt.positions.is_empty());
                 assert!(bt.balance < balance);
             }
             _counter += 1;
