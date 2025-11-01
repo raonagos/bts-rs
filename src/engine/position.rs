@@ -1,5 +1,3 @@
-use rand::Rng;
-
 #[derive(Debug, Clone, PartialEq)]
 pub enum PositionSide {
     Long,
@@ -16,6 +14,8 @@ pub struct Position {
 
 impl Position {
     pub fn random_id() -> u32 {
+        use rand::Rng;
+
         let mut rng = rand::rng();
         rng.random_range(1..1000)
     }

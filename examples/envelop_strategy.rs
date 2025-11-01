@@ -1,27 +1,9 @@
-mod engine;
-mod utils;
-
-use crate::engine::*;
-use crate::utils::*;
+use bts::engine::*;
+use bts::utils::*;
+use bts::*;
 
 use anyhow::*;
-use ta::Next;
-use ta::indicators::SimpleMovingAverage;
-
-trait PercentCalculus<Rhs = Self> {
-    fn addpercent(self, rhs: Rhs) -> Self;
-    fn subpercent(self, rhs: Rhs) -> Self;
-}
-
-impl PercentCalculus for f64 {
-    fn addpercent(self, percent: Self) -> Self {
-        self + (self * percent / 100.0)
-    }
-
-    fn subpercent(self, percent: Self) -> Self {
-        self - (self * percent / 100.0)
-    }
-}
+use ta::{indicators::SimpleMovingAverage, *};
 
 fn main() -> Result<()> {
     let items = get_data_from_file("data/btc.json".into())?;
@@ -32,19 +14,23 @@ fn main() -> Result<()> {
 
     let initial_balance = 1_000.0;
     let mut bt = Backtest::new(candles.clone(), initial_balance);
-
     let mut sma = SimpleMovingAverage::new(5)?;
+
+    use std::result::Result;
 
     while let Some(candle) = bt.next() {
         let close = candle.close();
         let output = sma.next(close);
         let long_limit = output.subpercent(5.0);
-        let high = candle.high();
-        let low = candle.low();
+        let (high, low) = (candle.high(), candle.low());
 
         if low < long_limit {
             let quantity = (15.0 * bt.balance() / 100.0) / long_limit;
-            _ = bt.open_position((PositionSide::Long, long_limit, quantity).into());
+            if let Result::Ok(pos) =
+                bt.open_position((PositionSide::Long, long_limit, quantity).into())
+            {
+                println!("opened {}", pos.id());
+            }
         }
 
         if output < high && output > low {
@@ -58,6 +44,7 @@ fn main() -> Result<()> {
                 })
                 .for_each(|p| {
                     _ = bt.close_position(p.id(), output);
+                    println!("closed {}", p.id());
                 });
         }
     }
