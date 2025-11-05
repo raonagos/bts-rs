@@ -4,7 +4,7 @@ mod position;
 pub use candle::*;
 pub use position::*;
 
-use anyhow::{Error, Result};
+use crate::errors::{Error, Result};
 
 #[derive(Debug)]
 pub struct Backtest {
@@ -55,8 +55,8 @@ impl Backtest {
             (position.side(), position.entry_price(), position.quantity());
         let cost = price * quantity;
 
-        if self.balance < 20.0 || self.balance < cost {
-            return Err(Error::msg("Unbalanced wallet"));
+        if self.balance < cost {
+            return Err(Error::LessBalance(cost));
         }
 
         match side {
@@ -101,7 +101,7 @@ impl Backtest {
             return Ok(value);
         }
 
-        Err(Error::msg("No opened position"))
+        Err(Error::EmptyPosition)
     }
 
     pub fn reset(&mut self) {

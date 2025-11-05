@@ -1,7 +1,8 @@
-use std::{fs::File, io::BufReader, path::PathBuf};
+use chrono::{DateTime, Utc};
 
-use anyhow::{Error, Result};
-use chrono::{DateTime, Utc, serde::ts_microseconds};
+#[cfg(feature = "serde")]
+use chrono::serde::ts_microseconds;
+#[cfg(feature = "serde")]
 use serde::Deserialize;
 
 // "open_time": 1759813200000,
@@ -17,23 +18,24 @@ use serde::Deserialize;
 // "taker_buy_quote_volume": 26344187.9144172,
 // "ignore": 0.0
 
-#[derive(Debug, Deserialize, Clone)]
+#[cfg_attr(feature = "serde", derive(Deserialize))]
+#[derive(Debug, Clone)]
 pub struct Data {
-    #[serde(alias = "open_price")]
+    #[cfg_attr(feature = "serde", serde(alias = "open_price"))]
     open: f64,
-    #[serde(alias = "high_price")]
+    #[cfg_attr(feature = "serde", serde(alias = "high_price"))]
     high: f64,
-    #[serde(alias = "low_price")]
+    #[cfg_attr(feature = "serde", serde(alias = "low_price"))]
     low: f64,
-    #[serde(alias = "close_price")]
+    #[cfg_attr(feature = "serde", serde(alias = "close_price"))]
     close: f64,
-    #[serde(rename = "quote_asset_volume")]
+    #[cfg_attr(feature = "serde", serde(rename = "quote_asset_volume"))]
     volume: f64,
-    #[serde(rename = "taker_buy_quote_volume")]
+    #[cfg_attr(feature = "serde", serde(rename = "taker_buy_quote_volume"))]
     bid: f64,
-    #[serde(with = "ts_microseconds")]
+    #[cfg_attr(feature = "serde", serde(with = "ts_microseconds"))]
     open_time: DateTime<Utc>,
-    #[serde(with = "ts_microseconds")]
+    #[cfg_attr(feature = "serde", serde(with = "ts_microseconds"))]
     close_time: DateTime<Utc>,
 }
 
@@ -75,8 +77,12 @@ impl Data {
     }
 }
 
-pub fn get_data_from_file(filepath: PathBuf) -> Result<Vec<Data>> {
+#[cfg(feature = "serde")]
+pub fn get_data_from_file(filepath: std::path::PathBuf) -> crate::errors::Result<Vec<Data>> {
+    use crate::errors::Error;
+    use std::{fs::File, io::BufReader};
+
     let file = File::open(filepath)?;
     let reader = BufReader::new(file);
-    serde_json::from_reader(reader).map_err(|e| Error::msg(e.to_string()))
+    serde_json::from_reader(reader).map_err(Error::from)
 }

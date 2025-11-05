@@ -1,4 +1,5 @@
 pub mod engine;
+pub mod errors;
 pub mod utils;
 
 use std::ops::{Add, Div, Mul, Sub};

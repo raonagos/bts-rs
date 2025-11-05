@@ -53,6 +53,7 @@ dependencies = [
  "serde-this-or-that",
  "serde_json",
  "ta",
+ "thiserror",
 ]
 
 [[package]]

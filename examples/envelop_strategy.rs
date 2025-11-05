@@ -16,8 +16,6 @@ fn main() -> Result<()> {
     let mut bt = Backtest::new(candles.clone(), initial_balance);
     let mut sma = SimpleMovingAverage::new(5)?;
 
-    use std::result::Result;
-
     while let Some(candle) = bt.next() {
         let close = candle.close();
         let output = sma.next(close);

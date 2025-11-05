@@ -79,6 +79,20 @@ pub struct PositionEvent {
     event_type: PositionEventType,
 }
 
+impl PositionEvent {
+    pub fn index(&self) -> usize {
+        self.candle_index
+    }
+
+    pub fn price(&self) -> f64 {
+        self.price
+    }
+
+    pub fn event_type(&self) -> PositionEventType {
+        self.event_type.clone()
+    }
+}
+
 impl From<(usize, f64, PositionEventType)> for PositionEvent {
     fn from((index, price, event): (usize, f64, PositionEventType)) -> Self {
         Self {
