@@ -1,6 +1,9 @@
 mod candle;
 mod position;
 
+#[cfg(test)]
+mod tests;
+
 pub use candle::*;
 pub use position::*;
 
@@ -10,6 +13,7 @@ use crate::errors::{Error, Result};
 pub struct Backtest {
     data: Vec<Candle>,
     positions: Vec<Position>,
+    // used to reset balance
     _balance: f64,
     balance: f64,
     index: usize,
@@ -102,6 +106,39 @@ impl Backtest {
         Err(Error::EmptyPosition)
     }
 
+    pub fn close_all_positions(&mut self, exit_price: f64) -> Result<f64> {
+        let value = self
+            .positions
+            .iter()
+            .map(|position| {
+                let value = match position.side() {
+                    PositionSide::Long => {
+                        let value = exit_price * position.quantity();
+                        self.balance += value;
+                        value
+                    }
+                    PositionSide::Short => {
+                        self.balance -= position.entry_price() * position.quantity();
+                        let profit = (position.entry_price() - exit_price) * position.quantity();
+                        self.balance += profit;
+                        profit
+                    }
+                };
+
+                self.position_history.push(PositionEvent::from((
+                    self.index,
+                    exit_price,
+                    PositionEventType::Close,
+                )));
+
+                value
+            })
+            .sum();
+        self.positions.clear();
+
+        Ok(value)
+    }
+
     pub fn reset(&mut self) {
         self.index = 0;
         self.positions = Vec::new();
@@ -117,115 +154,5 @@ impl Iterator for Backtest {
         let item = self.data.get(self.index).cloned();
         self.index += 1;
         item
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::PositionSide::*;
-    use super::*;
-
-    fn get_data() -> Vec<Candle> {
-        vec![
-            Candle::from((100.0, 111.0, 99.0, 110.0, 1.0)),
-            Candle::from((110.0, 112.0, 100.0, 120.0, 1.0)),
-            Candle::from((120.0, 121.0, 100.0, 110.0, 1.0)),
-        ]
-    }
-
-    #[test]
-    fn test_long_position() {
-        let data = get_data();
-        let balance = 1000.0;
-        let mut bt = Backtest::new(data, balance);
-        let mut _counter = 0;
-        while let Some(candle) = bt.next() {
-            let price = candle.close();
-            if _counter == 0 {
-                let result = bt.open_position((18, Long, price, 1.0).into()); // balance (1000.0) -= 110.0 * 1.0 => 890.0;
-                assert!(result.is_ok());
-                assert!(!bt.positions.is_empty());
-                assert!(bt.balance < balance);
-            }
-            if _counter == 1 {
-                let result = bt.close_position(18, price);
-                assert!(result.is_ok());
-                assert!(bt.positions.is_empty());
-                assert!(bt.balance > balance);
-            }
-            _counter += 1;
-        }
-    }
-
-    #[test]
-    fn test_short_position() {
-        let data = get_data();
-        let balance = 1000.0;
-        let mut bt = Backtest::new(data, balance);
-        let mut _counter = 0;
-        while let Some(candle) = bt.next() {
-            let price = candle.close();
-            if _counter == 1 {
-                let result = bt.open_position((18, Short, price, 1.0).into());
-                assert!(result.is_ok());
-                assert!(!bt.positions.is_empty());
-                assert!(bt.balance > balance);
-            }
-            if _counter == 2 {
-                let result = bt.close_position(18, price);
-                assert!(result.is_ok());
-                assert!(bt.positions.is_empty());
-                assert!(bt.balance > balance);
-            }
-            _counter += 1;
-        }
-    }
-
-    #[test]
-    fn test_failed_long_position() {
-        let data = get_data();
-        let balance = 1000.0;
-        let mut bt = Backtest::new(data, balance);
-        let mut _counter = 0;
-        while let Some(candle) = bt.next() {
-            let price = candle.close();
-            if _counter == 1 {
-                let result = bt.open_position((18, Long, price, 1.0).into()); // balance (1000.0) -= 110.0 * 1.0 => 890.0;
-                assert!(result.is_ok());
-                assert!(!bt.positions.is_empty());
-                assert!(bt.balance < balance);
-            }
-            if _counter == 2 {
-                let result = bt.close_position(18, price);
-                assert!(result.is_ok());
-                assert!(bt.positions.is_empty());
-                assert!(bt.balance < balance);
-            }
-            _counter += 1;
-        }
-    }
-
-    #[test]
-    fn test_failed_short_position() {
-        let data = get_data();
-        let balance = 1000.0;
-        let mut bt = Backtest::new(data, balance);
-        let mut _counter = 0;
-        while let Some(candle) = bt.next() {
-            let price = candle.close();
-            if _counter == 0 {
-                let result = bt.open_position((18, Short, price, 1.0).into());
-                assert!(result.is_ok());
-                assert!(!bt.positions.is_empty());
-                assert!(bt.balance > balance);
-            }
-            if _counter == 1 {
-                let result = bt.close_position(18, price);
-                assert!(result.is_ok());
-                assert!(bt.positions.is_empty());
-                assert!(bt.balance < balance);
-            }
-            _counter += 1;
-        }
     }
 }

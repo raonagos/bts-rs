@@ -40,14 +40,22 @@ fn main() -> Result<()> {
                     entry.addpercent(5.0) < profit
                 })
                 .for_each(|p| {
-                    _ = bt.close_position(p.id(), output);
-                    println!("closed {}", p.id());
+                    if let Result::Ok(value) = bt.close_position(p.id(), output) {
+                        println!("closed {} value: {value}", p.id());
+                    }
                 });
         }
     }
 
     let f = candles.first().unwrap();
     let l = candles.last().unwrap();
+    let n = candles.len();
+
+    let exit_price = l.close();
+    if let Result::Ok(sum) = bt.close_all_positions(exit_price) {
+        println!("\nclose all positions sum: {sum}");
+    }
+
     let buy_and_hold = 100.0 * (initial_balance * l.close() / f.close()) / initial_balance;
     let new_balance = bt.current_balance();
     let performance = 100.0 * new_balance / initial_balance;
@@ -58,7 +66,7 @@ fn main() -> Result<()> {
     };
     let count_position = bt.position_history().len();
     println!(
-        "new balance {new_balance} USD\ntrades {count_position}\nperformance {performance:.3}%\nbuy and hold {buy_and_hold:.3}%"
+        "new balance {new_balance} USD\ntrades {count_position} / total ticks {n}\nperformance {performance:.3}%\nbuy and hold {buy_and_hold:.3}%"
     );
 
     Ok(())
