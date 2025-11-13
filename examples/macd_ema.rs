@@ -1,13 +1,10 @@
-use bts::engine::*;
-use bts::utils::*;
-use bts::*;
+use bts::prelude::*;
 
-use anyhow::*;
 use ta::indicators::MovingAverageConvergenceDivergence;
 use ta::indicators::MovingAverageConvergenceDivergenceOutput;
 use ta::{indicators::ExponentialMovingAverage, *};
 
-fn main() -> Result<()> {
+fn main() -> anyhow::Result<()> {
     let items = get_data_from_file("data/btc.json".into())?;
     let candles = items
         .iter()

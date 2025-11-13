@@ -2,6 +2,13 @@ pub mod engine;
 pub mod errors;
 pub mod utils;
 
+pub mod prelude {
+    pub use super::*;
+    pub use crate::engine::*;
+    pub use crate::errors::*;
+    pub use crate::utils::*;
+}
+
 use std::ops::{Add, Div, Mul, Sub};
 
 pub trait PercentCalculus<Rhs = Self> {

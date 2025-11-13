@@ -1,11 +1,8 @@
-use bts::engine::*;
-use bts::utils::*;
-use bts::*;
+use bts::prelude::*;
 
-use anyhow::*;
 use ta::{indicators::SimpleMovingAverage, *};
 
-fn main() -> Result<()> {
+fn main() -> anyhow::Result<()> {
     let items = get_data_from_file("data/btc.json".into())?;
     let candles = items
         .iter()
