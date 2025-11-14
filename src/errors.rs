@@ -7,8 +7,8 @@ pub type Result<T> = StdResult<T, Error>;
 pub enum Error {
     #[error("Balance less than {0}")]
     LessBalance(f64),
-    #[error("Opened position are empty")]
-    EmptyPosition,
+    #[error("Position not found")]
+    PositionNotFound,
     #[error("{0}")]
     IoError(#[from] std::io::Error),
     #[cfg(feature = "serde")]

@@ -1,53 +1,17 @@
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
-
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[derive(Debug, Clone)]
-pub enum PriceType {
-    Usd(f64),
-    Percent(f64),
-}
-
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[doc(alias = "ExitRule")]
-#[derive(Debug, Clone)]
-pub enum PositionExitRule {
-    Limit(PriceType),
-    StopLoss(PriceType),
-    TakeProfit(PriceType),
-    TrailingStop(PriceType),
-    TakeProfitAndStopLoss((PriceType, PriceType)),
-}
-
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[doc(alias = "Side")]
 #[derive(Debug, Clone, PartialEq)]
 pub enum PositionSide {
     Long,
     Short,
 }
 
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Position {
-    quantity: f64,
-    entry_price: f64,
-    side: PositionSide,
+    pub entry_price: f64,
+    pub quantity: f64,
+    pub side: PositionSide,
 }
 
 impl Position {
-    pub fn side(&self) -> &PositionSide {
-        &self.side
-    }
-
-    pub fn quantity(&self) -> f64 {
-        self.quantity
-    }
-
-    pub fn entry_price(&self) -> f64 {
-        self.entry_price
-    }
-
     pub fn cost(&self) -> f64 {
         self.entry_price * self.quantity
     }
@@ -82,8 +46,6 @@ impl From<P1> for Position {
     }
 }
 
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[doc(alias = "Event")]
 #[derive(Debug, Clone)]
 pub struct PositionEvent {
     open: (usize, PositionSide, f64),

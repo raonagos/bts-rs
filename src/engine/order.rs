@@ -1,16 +1,20 @@
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
-
 use crate::engine::{Position, PositionSide};
 
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Debug, Clone)]
 pub enum OrderSide {
     Buy,
     Sell,
 }
 
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+impl Into<PositionSide> for OrderSide {
+    fn into(self) -> PositionSide {
+        match self {
+            OrderSide::Buy => PositionSide::Long,
+            OrderSide::Sell => PositionSide::Short,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum OrderType {
     Market(f64),
@@ -18,45 +22,48 @@ pub enum OrderType {
 }
 
 impl OrderType {
-    pub(crate) fn inner(&self) -> f64 {
+    pub fn inner(&self) -> f64 {
         match self {
             Self::Market(price) | Self::Limit(price) => price.to_owned(),
         }
     }
 }
 
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Debug, Clone)]
 pub struct Order {
     _type: OrderType,
-    quantity: f64,
-    side: OrderSide,
+    pub quantity: f64,
+    pub side: OrderSide,
 }
 
 impl Into<Position> for Order {
     fn into(self) -> Position {
-        let side = match self.side {
-            OrderSide::Buy => PositionSide::Long,
-            OrderSide::Sell => PositionSide::Short,
-        };
-        Position::from((side, self._type.inner(), self.quantity))
+        //! maybe this `into()` looping
+        Position::from((self.side.into(), self._type.inner(), self.quantity))
     }
 }
 
 impl Order {
+    pub fn reverse_position(position: &Position) -> Self {
+        Self {
+            _type: OrderType::Market(position.entry_price),
+            quantity: -position.quantity,
+            side: match position.side {
+                PositionSide::Long => OrderSide::Sell,
+                PositionSide::Short => OrderSide::Buy,
+            },
+        }
+    }
+
     pub fn entry_price(&self) -> f64 {
         self._type.inner()
     }
 
-    pub fn quantity(&self) -> f64 {
-        self.quantity
-    }
-
-    pub fn side(&self) -> &OrderSide {
-        &self.side
-    }
-
     pub(crate) fn cost(&self) -> f64 {
-        self.entry_price() * self.quantity
+        self._type.inner() * self.quantity
+    }
+
+    pub fn type_(&self) -> &OrderType {
+        &self._type
     }
 }
