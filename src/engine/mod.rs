@@ -13,11 +13,20 @@ pub use order::*;
 pub use position::*;
 use wallet::*;
 
+#[derive(Debug)]
+pub enum Event {
+    AddOrder(Order),
+    DelOrder(Order),
+    AddPosition(Position),
+    DelPosition(Position),
+}
+
 /// Backtesting engine for trading strategies.
 #[derive(Debug)]
 pub struct Backtest {
     index: usize,
     wallet: Wallet,
+    pub events: Vec<Event>,
     orders: Vec<Order>,
     pub data: Vec<Candle>,
     pub positions: Vec<Position>,
@@ -29,10 +38,15 @@ impl Backtest {
         Self {
             data,
             index: 0,
+            events: Vec::new(),
             orders: Vec::new(),
             positions: Vec::new(),
             wallet: Wallet::new(initial_balance),
         }
+    }
+
+    pub fn balance(&self) -> f64 {
+        self.wallet.balance()
     }
 
     /// Places a new order.
@@ -41,14 +55,27 @@ impl Backtest {
         if !self.wallet.lock(cost) {
             return Err(Error::InsufficientFunds(cost));
         }
-        self.orders.push(order);
+        self.orders.push(order.clone());
+        self.events.push(Event::AddOrder(order));
         Ok(())
+    }
+
+    /// Deletes a pending order.
+    pub fn delete_order(&mut self, order: &Order) -> Result<()> {
+        if let Some(order_idx) = self.orders.iter().position(|o| o == order) {
+            _ = self.orders.remove(order_idx);
+            self.wallet.unlock(order.cost());
+            self.events.push(Event::DelOrder(order.to_owned()));
+            return Ok(());
+        }
+        Err(Error::OrderNotFound)
     }
 
     /// Opens a new position.
     fn open_position(&mut self, position: Position) {
         self.wallet.sub(position.cost());
-        self.positions.push(position);
+        self.positions.push(position.clone());
+        self.events.push(Event::AddPosition(position));
     }
 
     /// Closes an existing position.
@@ -56,7 +83,6 @@ impl Backtest {
         if let Some(pos_idx) = self.positions.iter().position(|p| p == position) {
             _ = self.positions.remove(pos_idx);
             let cost = position.cost();
-            self.wallet.unlock(cost);
 
             // Calculate profit/loss and update wallet
             let entry_price = position.entry_price();
@@ -65,11 +91,21 @@ impl Backtest {
                 PositionSide::Long => (exit_price - entry_price) * quantity,
                 PositionSide::Short => (entry_price - exit_price) * quantity,
             };
-            self.wallet.add(profit);
-
+            self.wallet.add(profit, cost);
+            self.events.push(Event::DelPosition(position.to_owned()));
             return Ok(profit);
         }
         Err(Error::PositionNotFound)
+    }
+
+    pub fn close_all_positions(&mut self, exit_price: f64) {
+        let mut i = 0;
+        while i < self.positions.len() {
+            let position = self.positions[i].clone();
+            _ = self.close_position(&position, exit_price);
+            //todo check this
+            i += 1;
+        }
     }
 
     /// Executes pending orders based on current candle data.
@@ -95,7 +131,7 @@ impl Backtest {
         if let Some(cc) = current_candle {
             let mut i = 0;
             while i < self.positions.len() {
-                let position = &self.positions[i].clone();
+                let position = self.positions[i].clone();
                 let should_close = match position.exit_rule() {
                     Some(OrderType::TakeProfitAndStopLoss(take_profit, stop_loss)) => {
                         match position.side {
@@ -133,7 +169,6 @@ impl Backtest {
                 };
 
                 if should_close {
-                    let position = self.positions.remove(i);
                     let exit_price = match position.exit_rule() {
                         Some(OrderType::TakeProfitAndStopLoss(take_profit, stop_loss)) => {
                             match position.side {
@@ -154,6 +189,7 @@ impl Backtest {
                             }
                         }
                         Some(OrderType::TrailingStop(price, percent)) => match position.side {
+                            //todo update trailing stop
                             PositionSide::Long => price.subpercent(*percent),
                             PositionSide::Short => price.addpercent(*percent),
                         },
@@ -173,8 +209,6 @@ impl Backtest {
     where
         F: FnMut(&mut Self, &Candle),
     {
-        use std::ops::AddAssign;
-
         while self.index < self.data.len() {
             if self.wallet.free_balance() <= 0.0 {
                 return Err(Error::InsufficientFunds(0.0));
@@ -184,7 +218,7 @@ impl Backtest {
             func(self, candle);
             self.execute_orders();
             self.execute_positions();
-            self.index.add_assign(1);
+            self.index += 1;
         }
 
         Ok(())

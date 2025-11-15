@@ -1,8 +1,10 @@
+use std::ops::Add;
+
 /// Represents a trading wallet with balance and locked funds management.
 #[derive(Debug)]
 pub(crate) struct Wallet {
     // Initial balance used for reset
-    _balance: f64,
+    initial_balance: f64,
     // Available balance
     balance: f64,
     // Funds locked in open positions
@@ -14,7 +16,7 @@ impl Wallet {
     /// Negative balances are set to 0.
     pub fn new(balance: f64) -> Self {
         Self {
-            _balance: balance.max(0.0),
+            initial_balance: balance.max(0.0),
             balance: balance.max(0.0),
             locked: 0.0,
         }
@@ -25,20 +27,21 @@ impl Wallet {
         self.balance - self.locked
     }
 
-    /// Adds funds to the wallet.
-    pub fn add(&mut self, amount: f64) {
-        self.balance += amount.max(0.0);
+    pub fn balance(&self) -> f64 {
+        self.balance
     }
 
-    /// Subtracts funds from the wallet.
-    /// Returns true if successful, false if insufficient funds.
-    pub fn sub(&mut self, amount: f64) -> bool {
-        if self.free_balance() >= amount {
-            self.balance -= amount;
-            true
-        } else {
-            false
-        }
+    /// Adds funds to the wallet.
+    pub fn add(&mut self, amount: f64, locked_amount: f64) {
+        self.locked -= locked_amount.min(self.locked);
+        self.balance += amount.add(locked_amount).max(0.0);
+    }
+
+    /// Subtracts funds from the balance (after an order is executed).
+    /// Assumes funds are already locked.
+    pub fn sub(&mut self, amount: f64) {
+        self.balance -= amount.min(self.balance);
+        self.locked -= amount.min(self.locked);
     }
 
     /// Locks additional funds for a position.
@@ -51,7 +54,7 @@ impl Wallet {
         }
     }
 
-    /// Unlocks funds when a position is closed.
+    /// Unlocks funds when an order/position is closed.
     pub fn unlock(&mut self, amount: f64) {
         self.locked -= amount.min(self.locked);
     }
@@ -59,6 +62,6 @@ impl Wallet {
     /// Resets the wallet to its initial balance.
     pub fn reset(&mut self) {
         self.locked = 0.0;
-        self.balance = self._balance;
+        self.balance = self.initial_balance;
     }
 }

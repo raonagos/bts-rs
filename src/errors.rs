@@ -9,6 +9,8 @@ pub enum Error {
     InsufficientFunds(f64),
     #[error("Position not found")]
     PositionNotFound,
+    #[error("Order not found")]
+    OrderNotFound,
     #[error("{0}")]
     IoError(#[from] std::io::Error),
     #[cfg(feature = "serde")]
