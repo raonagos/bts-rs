@@ -11,6 +11,8 @@ pub enum Error {
     PositionNotFound,
     #[error("Order not found")]
     OrderNotFound,
+    #[error("Negative or zero balance")]
+    NegZeroBalance,
     #[error("{0}")]
     IoError(#[from] std::io::Error),
     #[cfg(feature = "serde")]

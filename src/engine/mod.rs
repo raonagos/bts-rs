@@ -32,21 +32,27 @@ pub struct Backtest {
     pub positions: Vec<Position>,
 }
 
+impl std::ops::Deref for Backtest {
+    type Target = Wallet;
+
+    fn deref(&self) -> &Self::Target {
+        &self.wallet
+    }
+}
+
 impl Backtest {
     /// Creates a new backtest instance with the given candle data.
-    pub fn new(data: Vec<Candle>, initial_balance: f64) -> Self {
-        Self {
+    pub fn new(data: Vec<Candle>, initial_balance: f64) -> Result<Self> {
+        let wallet = Wallet::new(initial_balance)?;
+
+        Ok(Self {
             data,
+            wallet,
             index: 0,
             events: Vec::new(),
             orders: Vec::new(),
             positions: Vec::new(),
-            wallet: Wallet::new(initial_balance),
-        }
-    }
-
-    pub fn balance(&self) -> f64 {
-        self.wallet.balance()
+        })
     }
 
     /// Places a new order.
@@ -81,18 +87,11 @@ impl Backtest {
     /// Closes an existing position.
     pub fn close_position(&mut self, position: &Position, exit_price: f64) -> Result<f64> {
         if let Some(pos_idx) = self.positions.iter().position(|p| p == position) {
-            _ = self.positions.remove(pos_idx);
-            let cost = position.cost();
-
             // Calculate profit/loss and update wallet
-            let entry_price = position.entry_price();
-            let quantity = position.quantity;
-            let profit = match position.side {
-                PositionSide::Long => (exit_price - entry_price) * quantity,
-                PositionSide::Short => (entry_price - exit_price) * quantity,
-            };
-            self.wallet.add(profit, cost);
+            let profit = position.estimate_profit(exit_price);
+            self.wallet.add(profit + position.cost());
             self.events.push(Event::DelPosition(position.to_owned()));
+            _ = self.positions.remove(pos_idx);
             return Ok(profit);
         }
         Err(Error::PositionNotFound)
@@ -210,8 +209,8 @@ impl Backtest {
         F: FnMut(&mut Self, &Candle),
     {
         while self.index < self.data.len() {
-            if self.wallet.free_balance() <= 0.0 {
-                return Err(Error::InsufficientFunds(0.0));
+            if self.wallet.balance() <= 0.0 {
+                return Err(Error::NegZeroBalance);
             }
 
             let candle = &self.data[self.index].clone();

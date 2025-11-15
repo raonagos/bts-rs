@@ -38,3 +38,12 @@ impl std::ops::DerefMut for Position {
         &mut self.order
     }
 }
+
+impl Position {
+    pub fn estimate_profit(&self, exit_price: f64) -> f64 {
+        match self.side {
+            PositionSide::Long => (exit_price - self.entry_price()) * self.quantity,
+            PositionSide::Short => (self.entry_price() - exit_price) * self.quantity,
+        }
+    }
+}
