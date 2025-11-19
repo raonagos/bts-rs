@@ -6,5 +6,4 @@
 ## 📌 In Progress
 - [ ] Add `Candle` builder for validation
 - [ ] Create `Report` struct to wrap metrics (P&L, drawdown, Sharpe)
-- [ ] Split order types: `OrderType` (open) + `ExitRule` (close only)
 - [ ] Add methods to modify orders/positions (update SL/TP/trailing stop)

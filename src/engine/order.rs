@@ -8,11 +8,46 @@ pub enum OrderSide {
 }
 
 /// Represents the type of an order (market, limit, take-profit/stop-loss, trailing stop).
-#[derive(Debug, Clone)]
+/// Enum representing the type of an order.
+///
+/// This enum is divided into two categories:
+/// 1. **Order types for opening positions** (Market, Limit)
+/// 2. **Exit rules for closing positions** (TakeProfit, StopLoss, TrailingStop)
+///
+/// This separation ensures clarity between order types used to open positions
+/// and rules used to automatically close them.
+#[derive(Debug, Clone, PartialEq)]
 pub enum OrderType {
+    /// Market order to open a position immediately at the current price.
+    ///
+    /// ### Arguments
+    /// * `0` - The price at which the market order should be executed.
     Market(f64),
+
+    /// Limit order to open a position only at a specified price or better.
+    ///
+    /// ### Arguments
+    /// * `0` - The limit price for the order.
     Limit(f64),
+
+    /// Combined take-profit and stop-loss exit rule for a position.
+    ///
+    /// When either the take-profit or stop-loss price is reached, the position will be closed.
+    ///
+    /// ### Arguments
+    /// * `0` - The take-profit price (0.0 to disable)
+    /// * `1` - The stop-loss price (0.0 to disable)
     TakeProfitAndStopLoss(f64, f64),
+
+    /// Trailing stop exit rule for a position.
+    ///
+    /// The stop price trails the market price by a specified percentage.
+    /// For long positions, the stop moves up as the price increases.
+    /// For short positions, the stop moves down as the price decreases.
+    ///
+    /// ### Arguments
+    /// * `0` - The initial stop price
+    /// * `1` - The trailing percentage (e.g., 10.0 for 10%)
     TrailingStop(f64, f64),
 }
 
@@ -43,7 +78,6 @@ impl PartialEq for Order {
 }
 
 type O1 = (OrderType, f64, OrderSide);
-type O2 = (OrderType, OrderType, f64, OrderSide);
 impl From<O1> for Order {
     fn from((entry_type, quantity, side): O1) -> Self {
         Self {
@@ -56,6 +90,7 @@ impl From<O1> for Order {
     }
 }
 
+type O2 = (OrderType, OrderType, f64, OrderSide);
 impl From<O2> for Order {
     fn from((entry_type, exit_type, quantity, side): O2) -> Self {
         Self {
@@ -88,6 +123,10 @@ impl Order {
     /// Returns the exit rule of the order, if any.
     pub fn exit_rule(&self) -> &Option<OrderType> {
         &self.exit_type
+    }
+
+    pub fn is_market_type(&self) -> bool {
+        matches!(self.entry_type, OrderType::Market(_))
     }
 
     /// Updates the trailing stop price for the order.

@@ -187,7 +187,10 @@ impl Backtest {
             if price >= candle.low() && price <= candle.high() {
                 self.open_position(Position::from(order))?;
             } else {
-                orders.push_back(order);
+                //? if order is market type and does not between `high` and `low`, delete
+                if !order.is_market_type() {
+                    orders.push_back(order);
+                }
             }
         }
         self.orders.append(&mut orders);

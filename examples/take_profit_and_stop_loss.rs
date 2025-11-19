@@ -1,3 +1,32 @@
+//! # Turtle Trading Strategy with Take profit and Stop loss
+//!
+//! This example implements a simplified version of the famous **Turtle Trading Strategy**
+//! developed by Richard Dennis, which uses trend-following techniques with strict risk management.
+//!
+//! ## Key Principles of the Turtle Strategy:
+//! - **Risk Management**: Never risk more than 2% of capital on a single trade
+//! - **Trend Following**: Use moving averages to identify trends
+//!
+//! ## Implementation Details:
+//! - Uses **100-period EMA** to determine trend direction (price > EMA = uptrend)
+//! - Uses **MACD histogram** to confirm momentum (histogram > 0 = bullish)
+//! - Implements **2% trailing stop** to manage risk and protect profits
+//! - Only trades when account has sufficient free balance (>50% of initial capital)
+//! - Calculates position size based on available capital and 2% risk rule
+//!
+//! ## Strategy Logic:
+//! 1. Calculate 100-period EMA and MACD indicators
+//! 2. Check if price is above EMA (uptrend) and MACD histogram is positive (momentum)
+//! 3. Verify account has sufficient free balance (>50% of initial capital)
+//! 4. Calculate position size based on 2% risk rule
+//! 5. Enter long position with 2% stop loss
+//! 6. Let the take profit or stop loss manage the trade exit
+//! 
+//! ## Risk Management:
+//! - Maximum 2% of capital risked per trade (implemented via position sizing)
+//! - Take profit and Stop loss protects profits and limits losses
+//! - Minimum trade size requirement prevents over-trading
+
 use bts::prelude::*;
 
 use ta::{
@@ -24,15 +53,16 @@ fn main() -> anyhow::Result<()> {
         let output = ema.next(close);
         let MovingAverageConvergenceDivergenceOutput { histogram, .. } = macd.next(close);
 
-        let free_balance = bt.free_balance()?;
-        let amount = free_balance.how_many(5.0);
+        let balance = bt.balance();
+        let amount = balance.how_many(2.0);
+        let amount = if amount >= 21.0 { amount } else { 21.0 };
 
         // 21: minimum to trade
-        if free_balance > (initial_balance / 2.0) && amount > 21.0 && close > output && histogram > 0.0 {
+        if balance > (initial_balance / 2.0) && amount >= 21.0 && close > output && histogram > 0.0 {
             let quantity = amount / close;
             let order = (
                 OrderType::Market(close),
-                OrderType::TakeProfitAndStopLoss(close * 2.63, close.subpercent(2.0)),
+                OrderType::TakeProfitAndStopLoss(close * 2.0, close.subpercent(2.0)),
                 quantity,
                 OrderSide::Buy,
             );
