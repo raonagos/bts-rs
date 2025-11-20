@@ -2,6 +2,7 @@
 name = "bts"
 version = "0.3.0"
 edition = "2024"
+description = "Backtest your trading strategy."
 authors = ["tetuaoro <65575727+tetuaoro@users.noreply.github.com>"]
 
 [dependencies]
@@ -30,14 +31,11 @@ anyhow = "1.0.100"
 [[example]]
 name = "ts"
 path = "examples/trailing_stop.rs"
-required-features = ["serde"]
 
 [[example]]
 name = "tpsl"
 path = "examples/take_profit_and_stop_loss.rs"
-required-features = ["serde"]
 
 [[example]]
-name = "emaparamopt"
+name = "emaopt"
 path = "examples/ema_parameter_optimization.rs"
-required-features = ["serde"]

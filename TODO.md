@@ -1,21 +1,11 @@
 # BTS TODO
 
 ## ✅ Done
-- [x] Order management system
-  - Place/delete orders with validation
-  - Position opening/closing logic
-- [x] Position management
-  - Track open/closed positions
-  - Calculate P&L and unrealized gains
 - [x] Wallet management
-  - Balance tracking with locked funds
-  - Free balance calculations
+- [x] Position management
+- [x] Order management system
 - [x] Market simulation engine
-  - Candle-by-candle execution
-  - Event-based processing
 - [x] Market fees implementation
-  - Volume-based fee calculation
-  - Applied on position open
 - [x] Add `Candle` builder for validation
 
 ## 📌 In Progress
@@ -26,12 +16,11 @@
 
 ### Core Features
 - [ ] WASM compilation support
-- [ ] Timeframe/Volume aggregation (1H → 4H/8H/1D or 1D → 7D/1M)
-- [ ] Multi-strategy parallel execution
-- [ ] Strategy registry (5+ templates)
 - [ ] Genetic parameter optimization
+- [ ] Strategy registry (5+ templates)
+- [ ] Multi-strategy parallel execution
+- [ ] Automated report generation (PDF/HTML)
+- [ ] Timeframe/Volume aggregation (1H → 4H/8H/1D or 1D → 7D/1M)
 
 ### Advanced Features
-- [ ] Monte Carlo robustness testing
-- [ ] Automated report generation (PDF/HTML)
-- [ ] Web dashboard integration
+- [ ] Web/Desktop App dashboard integration

@@ -11,6 +11,8 @@ pub struct Wallet {
     locked: f64,
     // Unrealized profit/loss from open positions
     unrealized_pnl: f64,
+    // Cumulative fees paid
+    fees: f64,
 }
 
 impl Wallet {
@@ -23,6 +25,7 @@ impl Wallet {
 
         Ok(Self {
             balance,
+            fees: 0.0,
             locked: 0.0,
             unrealized_pnl: 0.0,
             initial_balance: balance,
@@ -48,6 +51,11 @@ impl Wallet {
         Ok(free_balance)
     }
 
+    /// Returns the fees paid to the market.
+    pub fn fees_paid(&self) -> f64 {
+        self.fees
+    }
+
     /// Adds funds to the wallet.
     pub(crate) fn add(&mut self, amount: f64) -> Result<f64> {
         self.balance += amount;
@@ -65,6 +73,7 @@ impl Wallet {
     /// Subtracts the market fees from the balance (after a position is executed).
     pub(crate) fn sub_fees(&mut self, amount: f64) -> Result<f64> {
         self.balance -= amount;
+        self.fees += amount;
         self.free_balance()
     }
 
@@ -108,6 +117,7 @@ impl Wallet {
 
     /// Resets the wallet to its initial balance.
     pub(crate) fn reset(&mut self) {
+        self.fees = 0.0;
         self.locked = 0.0;
         self.unrealized_pnl = 0.0;
         self.balance = self.initial_balance;
@@ -205,10 +215,13 @@ fn reset_wallet() {
     wallet.lock(20.0).unwrap();
     wallet.sub(20.0).unwrap();
     wallet.add(10.0).unwrap();
+    wallet.sub_fees(0.2).unwrap();
 
     wallet.reset();
-    assert_eq!(wallet.balance, 100.0);
+    assert_eq!(wallet.fees, 0.0);
     assert_eq!(wallet.locked, 0.0);
+    assert_eq!(wallet.balance, 100.0);
+    assert_eq!(wallet.total_balance(), 100.0);
     assert_eq!(wallet.free_balance().unwrap(), 100.0);
 }
 

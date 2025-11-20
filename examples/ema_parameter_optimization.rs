@@ -21,29 +21,15 @@
 //!    - Top performing periods (successful backtests)
 //!    - Error cases (failed backtests)
 
+mod data;
+
 use std::cmp::Ordering;
 
 use bts::prelude::*;
-
 use ta::{indicators::ExponentialMovingAverage, *};
 
 fn main() -> anyhow::Result<()> {
-    let items = get_data_from_file("data/btc.json".into())?;
-    let candles = items
-        .iter()
-        .map(|d| {
-            CandleBuilder::builder()
-                .open(d.open())
-                .high(d.high())
-                .low(d.low())
-                .close(d.close())
-                .volume(d.volume())
-                .bid(d.bid())
-                .build()
-                .unwrap()
-        })
-        .collect::<Vec<_>>();
-
+    let candles = data::generate_sample_candles(0..3000, 42, 100.0);
     let initial_balance = 1_000.0;
     let mut bt = Backtest::new(candles.clone(), initial_balance, None)?;
 
