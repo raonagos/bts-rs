@@ -175,7 +175,7 @@ impl CandleBuilder {
 
         // Validate prices
         if !(low <= open && low <= close && low <= high && high >= open && high >= close && low >= 0.0) {
-            return Err(Error::InvalidPriceOrder { open, low, high, close });
+            return Err(Error::InvalidPriceOrder(open, low, high, close));
         }
 
         // Validate volume

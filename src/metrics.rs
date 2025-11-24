@@ -1,22 +1,72 @@
+//! Performance metrics for backtesting.
+//!
+//! This module provides tools to calculate:
+//! - Max drawdown
+//! - Profit factor
+//! - Sharpe ratio
+//! - Win rate
+//!
+//! Events generated during backtesting.
+//!
+//! This module defines the `Event` enum, which represents actions and state changes
+//! during a backtest, such as order execution, position updates, and wallet changes.
+
 use std::fmt;
 
 use crate::engine::*;
 
+/// Events generated during a backtest.
+///
+/// Each event corresponds to an action or state change, such as:
+/// - Adding or removing orders/positions.
+/// - Updating the wallet balance.
+/// - Charging fees.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Event {
+    /// An order has been added to the backtest.
+    ///
+    /// This event is triggered when a new order is created and added to the order queue.
     AddOrder(Order),
+
+    /// An order has been removed from the backtest.
+    ///
+    /// This event is triggered when an order is canceled or executed.
     DelOrder(Order),
+
+    /// A position has been opened.
+    ///
+    /// This event is triggered when an order is executed and a new position is created.
     AddPosition(Position),
+
+    /// A position has been closed.
+    ///
+    /// This event is triggered when a position is closed, either manually or by an exit rule.
     DelPosition(Position),
+
+    /// The wallet balance has been updated.
+    ///
+    /// This event is triggered after each trade or fee deduction.
+    /// It contains the current state of the wallet.
     WalletUpdate {
+        /// Realized profit and loss.
         pnl: f64,
+        /// Total fees paid.
         fees: f64,
+        /// Available funds (not locked in open positions).
         free: f64,
+        /// Funds locked in open positions.
         locked: f64,
+        /// Total balance (free + locked + unrealized P&L).
         balance: f64,
     },
+
+    /// A fee has been charged for an order.
+    ///
+    /// This event is triggered when a fee is deducted from the wallet.
     FeeCharged {
+        /// Amount of the fee.
         fee: f64,
+        /// ID of the order that triggered the fee.
         order_id: u32,
     },
 }
@@ -43,15 +93,6 @@ impl From<&Backtest> for Metrics {
 
 impl Metrics {
     /// Creates a new `Metrics` instance from a list of events and an initial balance.
-    ///
-    /// ### Arguments
-    ///
-    /// * `events` - A vector of `Event`s to analyze.
-    /// * `initial_balance` - The initial balance of the trading account.
-    ///
-    /// ### Returns
-    ///
-    /// A new `Metrics` instance.
     pub fn new(events: Vec<Event>, initial_balance: f64) -> Self {
         Self {
             events,
@@ -60,8 +101,6 @@ impl Metrics {
     }
 
     /// Computes the maximum drawdown as a percentage.
-    ///
-    /// Drawdown is the peak-to-trough decline in the account balance.
     pub fn max_drawdown(&self) -> f64 {
         let mut balance_history = Vec::new();
         #[allow(unused_assignments)]
@@ -91,9 +130,6 @@ impl Metrics {
     }
 
     /// Computes the profit factor.
-    ///
-    /// Profit factor is the ratio of gross profits to gross losses.
-    /// A profit factor greater than 1.0 indicates a profitable strategy.
     pub fn profit_factor(&self) -> f64 {
         let mut total_gains = 0.0;
         let mut total_losses = 0.0;
@@ -180,7 +216,7 @@ fn create_position(pnl: f64) -> Position {
     // Mock the pnl() method for testing
     // In a real scenario, you would set the exit price or mock the behavior
     // Here, we assume Position has a method to set pnl directly for testing
-    position.set_exit_price(100.0 + pnl); // Simulate a P&L of `pnl`
+    position.set_exit_price(100.0 + pnl).unwrap(); // Simulate a P&L of `pnl`
     position
 }
 

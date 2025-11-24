@@ -1,3 +1,11 @@
+//! Core trading engine components.
+//!
+//! This module provides the fundamental types for backtesting:
+//! - `Order`: Market, limit, and conditional orders.
+//! - `Position`: Open trades with exit rules.
+//! - `Wallet`: Tracks balance, fees, and P&L.
+//! - `Candle`: OHLCV data for backtesting.
+
 mod candle;
 mod order;
 mod position;

@@ -8,7 +8,9 @@ use crate::{errors::*, utils::random_id};
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Debug, Clone)]
 pub enum PositionSide {
+    /// A long position, where the trader buys an asset with the expectation that its price will increase.
     Long,
+    /// A short position, where the trader sells an asset (borrowed or owned) with the expectation that its price will decrease.
     Short,
 }
 
@@ -18,6 +20,7 @@ pub enum PositionSide {
 pub struct Position {
     id: u32,
     order: Order,
+    /// The side of the position, either long or short.
     pub side: PositionSide,
     #[cfg(feature = "metrics")]
     exit_price: Option<f64>,
@@ -59,6 +62,7 @@ impl std::ops::DerefMut for Position {
 
 impl Position {
     #[cfg(feature = "metrics")]
+    /// Updates the `exit_price`.
     pub(crate) fn set_exit_price(&mut self, exit_price: f64) -> Result<()> {
         if exit_price < 0.0 {
             return Err(Error::ExitPrice(exit_price));
@@ -68,11 +72,13 @@ impl Position {
     }
 
     #[cfg(feature = "metrics")]
+    /// Returns the estimated profit and loss if it is closed at the `exit_price`.
     pub(crate) fn pnl(&self) -> Result<f64> {
         let exit_price = self.exit_price.ok_or(Error::ExitPrice(0.0))?;
         self.estimate_pnl(exit_price)
     }
 
+    /// Returns the estimated profit and loss if it is closed at the `exit_price`.
     pub fn estimate_pnl(&self, exit_price: f64) -> Result<f64> {
         let pnl = match self.side {
             PositionSide::Long => (exit_price - self.entry_price()?) * self.quantity,
