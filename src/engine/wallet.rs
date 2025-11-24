@@ -1,6 +1,10 @@
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
 use crate::errors::{Error, Result};
 
 /// Represents a trading wallet with balance and locked funds management.
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Debug)]
 pub struct Wallet {
     // Initial balance used for reset
@@ -30,6 +34,21 @@ impl Wallet {
             unrealized_pnl: 0.0,
             initial_balance: balance,
         })
+    }
+
+    #[cfg(feature = "metrics")]
+    pub(crate) fn initial_balance(&self) -> f64 {
+        self.initial_balance
+    }
+
+    #[cfg(feature = "metrics")]
+    pub(crate) fn locked(&self) -> f64 {
+        self.locked
+    }
+
+    #[cfg(feature = "metrics")]
+    pub(crate) fn unrealized_pnl(&self) -> f64 {
+        self.unrealized_pnl
     }
 
     /// Returns the balance.

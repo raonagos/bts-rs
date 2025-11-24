@@ -1,9 +1,15 @@
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
 use crate::{errors::*, utils::random_id};
 
 /// Represents the side of an order (buy or sell).
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Debug, Clone)]
 pub enum OrderSide {
+    /// A buy order, where the trader wants to purchase an asset.
     Buy,
+    /// A sell order, where the trader wants to sell an asset.
     Sell,
 }
 
@@ -16,6 +22,7 @@ pub enum OrderSide {
 ///
 /// This separation ensures clarity between order types used to open positions
 /// and rules used to automatically close them.
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Debug, Clone, PartialEq)]
 pub enum OrderType {
     /// Market order to open a position immediately at the current price.
@@ -62,11 +69,14 @@ impl OrderType {
 }
 
 /// Represents an order with entry and exit rules.
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Debug, Clone)]
 pub struct Order {
     id: u32,
     entry_type: OrderType,
+    /// Represents the volume of the order.
     pub quantity: f64,
+    /// Represents the buy/sell side of the order.
     pub side: OrderSide,
     exit_type: Option<OrderType>,
 }
@@ -125,6 +135,7 @@ impl Order {
         &self.exit_type
     }
 
+    /// Returns true if it is a market order, and false if it is a limit order.
     pub fn is_market_type(&self) -> bool {
         matches!(self.entry_type, OrderType::Market(_))
     }

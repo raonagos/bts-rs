@@ -43,22 +43,30 @@ fn main() -> anyhow::Result<()> {
         Ok(())
     })?;
 
-    let first_price = candles.first().unwrap().close();
-    let last_price = candles.last().unwrap().close();
+    #[cfg(feature = "metrics")]
+    {
+        let metrics = Metrics::from(&bt);
+        println!("{metrics}");
+    }
 
-    let n = candles.len();
-    let close_position_events = bt.events().filter(|e| matches!(e, Event::DelPosition(_))).count();
-    println!("trades {close_position_events} / {n}");
+    #[cfg(not(feature = "metrics"))]
+    {
+        let first_price = candles.first().unwrap().close();
+        let last_price = candles.last().unwrap().close();
 
-    let new_balance = bt.balance();
-    let t_balance = bt.total_balance();
-    let new_balance_perf = initial_balance.change(new_balance);
-    let t_balance_perf = initial_balance.change(t_balance);
-    println!("performance {new_balance:.2}/{t_balance:.2} ({new_balance_perf:.2}%/{t_balance_perf:.2}%)");
+        let n = candles.len();
+        println!("trades {n}");
 
-    let buy_and_hold = (initial_balance / first_price) * last_price;
-    let buy_and_hold_perf = first_price.change(last_price);
-    println!("buy and hold {buy_and_hold:.2} ({buy_and_hold_perf:.2}%)");
+        let new_balance = bt.balance();
+        let t_balance = bt.total_balance();
+        let new_balance_perf = initial_balance.change(new_balance);
+        let t_balance_perf = initial_balance.change(t_balance);
+        println!("performance {new_balance:.2}/{t_balance:.2} ({new_balance_perf:.2}%/{t_balance_perf:.2}%)");
+
+        let buy_and_hold = (initial_balance / first_price) * last_price;
+        let buy_and_hold_perf = first_price.change(last_price);
+        println!("buy and hold {buy_and_hold:.2} ({buy_and_hold_perf:.2}%)");
+    }
 
     Ok(())
 }

@@ -1,8 +1,11 @@
+//! Error types for the BTS library.
+
 use chrono::{DateTime, Utc};
 
 /// Enum representing possible errors in the crate.
 pub type Result<T> = std::result::Result<T, Error>;
 
+/// Custom error types for the `bts` library.
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     /// The candle data provided is empty.
@@ -20,8 +23,8 @@ pub enum Error {
     MissingField(&'static str),
 
     /// Prices are not in valid order (open ≤ low ≤ high ≤ close).
-    #[error("Invalid price order: open={open}, low={low}, high={high}, close={close}")]
-    InvalidPriceOrder { open: f64, low: f64, high: f64, close: f64 },
+    #[error("Invalid price order: open={0}, low={1}, high={2}, close={3}")]
+    InvalidPriceOrder(f64, f64, f64, f64),
 
     /// Volume cannot be negative.
     #[error("Volume cannot be negative (got: {0})")]
@@ -113,12 +116,4 @@ pub enum Error {
     /// * `0` - The underlying I/O error.
     #[error("I/O error: {0}")]
     IoError(#[from] std::io::Error),
-
-    /// A JSON serialization/deserialization error occurred.
-    ///
-    /// ### Arguments
-    /// * `0` - The underlying JSON error.
-    #[cfg(feature = "serde")]
-    #[error("JSON error: {0}")]
-    JsonError(#[from] serde_json::Error),
 }

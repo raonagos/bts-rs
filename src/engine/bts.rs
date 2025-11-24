@@ -215,9 +215,9 @@ fn scenario_place_and_delete_order_with_market_fees() {
         bt.execute_positions(&candle).unwrap(); // close = 120, take profit
 
         assert!(bt.positions.is_empty());
-        assert_eq!(bt.balance(), 1010.0); // balance = 1020 - 10 (fees)
-        assert_eq!(bt.total_balance(), 1010.0);
-        assert_eq!(bt.free_balance().unwrap(), 1010.0);
+        assert_eq!(bt.balance(), 1000.0); // balance = 1020 - (10 * 2) (fees)
+        assert_eq!(bt.total_balance(), 1000.0);
+        assert_eq!(bt.free_balance().unwrap(), 1000.0);
     }
 }
 
@@ -252,9 +252,9 @@ fn scenario_open_position_with_market_fees() {
     bt.execute_positions(&candle).unwrap(); // close = 120, take profit
 
     assert!(bt.positions.is_empty());
-    assert_eq!(bt.balance(), 1010.0); // balance = 1020 - 10 (fees)
-    assert_eq!(bt.total_balance(), 1010.0);
-    assert_eq!(bt.free_balance().unwrap(), 1010.0);
+    assert_eq!(bt.balance(), 1000.0); // balance = 1020 - (10 * 2) (fees)
+    assert_eq!(bt.total_balance(), 1000.0);
+    assert_eq!(bt.free_balance().unwrap(), 1000.0);
 }
 
 #[test]

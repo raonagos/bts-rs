@@ -7,9 +7,9 @@
 - [x] Market simulation engine
 - [x] Market fees implementation
 - [x] Add `Candle` builder for validation
+- [x] Add `Metrics` struct to wrap metrics (P&L, drawdown, Sharpe)
 
 ## 📌 In Progress
-- [ ] Add `Report` struct to wrap metrics (P&L, drawdown, Sharpe)
 - [ ] Add methods to modify orders/positions (update SL/TP/trailing stop)
 
 ## 🚀 Road to v1.0.0
