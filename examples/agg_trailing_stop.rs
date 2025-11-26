@@ -1,4 +1,4 @@
-//! # Turtle Trading Strategy with Take profit and Stop loss
+//! # Turtle Trading Strategy with Trailing Stop and Multi-Timeframe Analysis
 //!
 //! This example implements a simplified version of the famous **Turtle Trading Strategy**
 //! developed by Richard Dennis, which uses trend-following techniques with strict risk management.
@@ -20,8 +20,22 @@ fn main() -> anyhow::Result<()> {
     let mut ema = ExponentialMovingAverage::new(100)?;
     let mut macd = MovingAverageConvergenceDivergence::default();
 
-    bt.run(|bt, candle| {
-        let close = candle.close();
+    struct TimeframeAggregator;
+
+    impl Aggregation for TimeframeAggregator {
+        fn factors(&self) -> &[usize] {
+            &[1, 4, 8]
+        }
+    }
+
+    let aggregator = TimeframeAggregator;
+    bt.run_with_aggregator(&aggregator, |bt, candles| {
+        let candle_one = candles.get(0).expect("hō'e");
+
+        if let Some(_candle_four_agg) = candles.get(1) {}
+        if let Some(_candle_eight_agg) = candles.get(2) {}
+
+        let close = candle_one.close();
         let output = ema.next(close);
         let MovingAverageConvergenceDivergenceOutput { histogram, .. } = macd.next(close);
 
@@ -33,8 +47,7 @@ fn main() -> anyhow::Result<()> {
             let quantity = amount / close;
             let order = (
                 OrderType::Market(close),
-                // 1/3 RR
-                OrderType::TakeProfitAndStopLoss(close.addpercent(6.0), close.subpercent(2.0)),
+                OrderType::TrailingStop(close, 2.0),
                 quantity,
                 OrderSide::Buy,
             );

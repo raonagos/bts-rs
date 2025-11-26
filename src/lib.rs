@@ -181,7 +181,7 @@ pub mod engine;
 pub mod errors;
 
 /// Utility functions and helpers.
-pub mod utils;
+mod utils;
 
 /// Performance metrics: drawdown, Sharpe ratio, win rate, etc.
 #[cfg(feature = "metrics")]
@@ -192,7 +192,6 @@ pub mod prelude {
     pub use super::*;
     pub use crate::engine::*;
     pub use crate::errors::*;
-    pub use crate::utils::*;
 
     #[cfg(feature = "metrics")]
     pub use crate::metrics::*;

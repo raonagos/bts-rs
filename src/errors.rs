@@ -18,6 +18,10 @@ pub enum Error {
     #[error("Candle not found")]
     CandleNotFound,
 
+    /// The Aggregator factor is invalid.
+    #[error("The Aggregator factor is invalid")]
+    InvalidFactor,
+
     /// A required field is missing.
     #[error("Missing required field: {0}")]
     MissingField(&'static str),

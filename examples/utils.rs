@@ -2,10 +2,11 @@
 
 use std::cmp::Ordering;
 use std::io::Write;
-use std::ops::Range;
 use std::sync::Mutex;
 
 use bts::engine::{Candle, CandleBuilder};
+#[cfg(feature = "metrics")]
+use bts::metrics::Metrics;
 use chrono::{DateTime, Duration};
 
 pub const CAPACITY: usize = 5;
@@ -64,10 +65,10 @@ impl<T: PartialOrd> SharedResults<T> {
 }
 
 /// Generates deterministic candle data.
-pub fn generate_sample_candles(range: Range<i32>, seed: i32, base_price: f64) -> Vec<Candle> {
+pub fn generate_sample_candles(max: i32, seed: i32, base_price: f64) -> Vec<Candle> {
     let mut open_time = DateTime::default();
 
-    range
+    (0..=max)
         .map(|i| {
             // Base price with trend (+ 0.5*i)
             let base_price = base_price + 0.5 * (i as f64);
@@ -106,6 +107,17 @@ pub fn generate_sample_candles(range: Range<i32>, seed: i32, base_price: f64) ->
             candle
         })
         .collect()
+}
+
+/// Pretty print Metrics
+#[cfg(feature = "metrics")]
+pub fn print_metrics(metrics: &Metrics, initial_balance: f64) {
+    println!("=== Backtest Metrics ===");
+    println!("Initial Balance: {:.2}", initial_balance);
+    println!("Max Drawdown: {:.2}%", metrics.max_drawdown());
+    println!("Profit Factor: {:.2}", metrics.profit_factor());
+    println!("Sharpe Ratio (risk-free rate = 2%): {:.2}", metrics.sharpe_ratio(0.02));
+    println!("Win Rate: {:.2}%", metrics.win_rate());
 }
 
 fn main() {}

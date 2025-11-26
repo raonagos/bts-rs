@@ -587,3 +587,39 @@ fn scenario_open_long_position_with_trailing_stop_loss() {
     assert_eq!(bt.total_balance(), 990.0);
     assert_eq!(bt.free_balance().unwrap(), 990.0);
 }
+
+struct TestAggregator;
+
+impl Aggregation for TestAggregator {
+    fn factors(&self) -> &[usize] {
+        &[1, 2]
+    }
+}
+
+#[test]
+fn scenario_with_aggregator() {
+    let data = get_long_data_trailing_stop_loss();
+    let mut bt = Backtest::new(data, 1.0, None).unwrap();
+
+    let mut ic = 0;
+    let mut captures_ic = vec![];
+    let aggregator = TestAggregator;
+    bt.run_with_aggregator(&aggregator, |_, candles| {
+        // factors = &[1, 2]
+
+        if let Some(_candle_one) = candles.get(0) {
+            captures_ic.push(ic);
+        }
+        if let Some(_candle_two) = candles.get(1) {
+            captures_ic.push(ic);
+        }
+        ic += 1;
+
+        Ok(())
+    })
+    .unwrap();
+
+    // iteration 0 => captures_ic = [0]
+    // iteration 1 => captures_ic = [0, 1, 1] because `candles.get(1)` is some
+    assert_eq!(captures_ic, vec![0, 1, 1]);
+}

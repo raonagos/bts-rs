@@ -14,7 +14,7 @@ use ta::{
 };
 
 fn main() -> anyhow::Result<()> {
-    let candles = utils::generate_sample_candles(0..3000, 42, 100.0);
+    let candles = utils::generate_sample_candles(3000, 42, 100.0);
     let initial_balance = 1_000.0;
     let mut bt = Backtest::new(candles.clone(), initial_balance, None)?;
     let mut ema = ExponentialMovingAverage::new(100)?;
@@ -45,8 +45,10 @@ fn main() -> anyhow::Result<()> {
 
     #[cfg(feature = "metrics")]
     {
+        use crate::utils::print_metrics;
+
         let metrics = Metrics::from(&bt);
-        println!("{metrics}");
+        print_metrics(&metrics, initial_balance);
     }
 
     #[cfg(not(feature = "metrics"))]

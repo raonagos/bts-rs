@@ -51,7 +51,7 @@ fn main() -> anyhow::Result<()> {
         return Err(anyhow::Error::msg("END must be greater than START"));
     }
 
-    let candles = utils::generate_sample_candles(0..3000, 42, 100.0);
+    let candles = utils::generate_sample_candles(3000, 42, 100.0);
     let initial_balance = 1_000.0;
     let min = START;
     let max = END;
@@ -73,10 +73,8 @@ fn main() -> anyhow::Result<()> {
         let mut bt = Backtest::new(candles.clone(), initial_balance, None).unwrap();
 
         for &(ema_period, macd1, macd2, macd3) in chunk {
-            let iter = shared.increment_iter();
-            if iter % 1000 == 0 {
-                shared.print_progress();
-            }
+            shared.increment_iter();
+            shared.print_progress();
 
             let mut ema = ExponentialMovingAverage::new(ema_period).unwrap();
             let mut macd = MovingAverageConvergenceDivergence::new(macd1, macd2, macd3).unwrap();

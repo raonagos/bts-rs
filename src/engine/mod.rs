@@ -24,7 +24,7 @@ use crate::metrics::*;
 pub use candle::*;
 pub use order::*;
 pub use position::*;
-use wallet::*;
+pub(crate) use wallet::*;
 
 #[cfg(test)]
 mod bts;
@@ -37,6 +37,48 @@ impl Iterator for Backtest {
         let candle = self.data.get(self.index).cloned();
         self.index += 1;
         candle
+    }
+}
+
+/// Trait for aggregating candles based on different criteria.
+pub trait Aggregation {
+    /// Returns the aggregation factors (e.g., [1, 4, 8]).
+    fn factors(&self) -> &[usize];
+
+    /// Aggregates a set of candles into a single candle.
+    fn aggregate(&self, candles: &[&Candle]) -> Result<Candle> {
+        if candles.is_empty() {
+            return Err(Error::CandleDataEmpty);
+        }
+
+        let first_candle = candles.first().unwrap();
+        let last_candle = candles.last().unwrap();
+
+        let open = first_candle.open();
+        let close = last_candle.close();
+        let uptrend_open = if open > close { open } else { close };
+        let uptrend_close = if open > close { close } else { open };
+
+        let high = candles.iter().map(|c| c.high()).fold(uptrend_open, f64::max);
+        let low = candles.iter().map(|c| c.low()).fold(uptrend_close, f64::min);
+        let volume = candles.iter().map(|c| c.volume()).sum::<f64>();
+        let bid = candles.iter().map(|c| c.bid()).sum::<f64>();
+
+        CandleBuilder::builder()
+            .open(open)
+            .high(high)
+            .low(low)
+            .close(close)
+            .volume(volume)
+            .bid(bid)
+            .open_time(first_candle.open_time())
+            .close_time(last_candle.close_time())
+            .build()
+    }
+
+    /// Determines if the current set of candles should be aggregated.
+    fn should_aggregate(&self, factor: usize, candles: &[&Candle]) -> bool {
+        candles.len() == factor
     }
 }
 
@@ -130,14 +172,7 @@ impl Backtest {
         self.orders.push_back(order.clone());
         #[cfg(feature = "metrics")]
         {
-            let wallet_event = Event::WalletUpdate {
-                locked: self.wallet.locked(),
-                fees: self.wallet.fees_paid(),
-                balance: self.wallet.balance(),
-                pnl: self.wallet.unrealized_pnl(),
-                free: self.wallet.free_balance()?,
-            };
-            self.events.push(wallet_event);
+            self.events.push(Event::from(&self.wallet));
             self.events.push(Event::AddOrder(order));
         }
         Ok(())
@@ -162,14 +197,7 @@ impl Backtest {
         self.wallet.unlock(order.cost()?)?;
         #[cfg(feature = "metrics")]
         {
-            let wallet_event = Event::WalletUpdate {
-                locked: self.wallet.locked(),
-                fees: self.wallet.fees_paid(),
-                balance: self.wallet.balance(),
-                free: self.wallet.free_balance()?,
-                pnl: self.wallet.unrealized_pnl(),
-            };
-            self.events.push(wallet_event);
+            self.events.push(Event::from(&self.wallet));
             self.events.push(Event::DelOrder(order.clone()));
         }
         Ok(())
@@ -188,14 +216,7 @@ impl Backtest {
         self.positions.push_back(position.clone());
         #[cfg(feature = "metrics")]
         {
-            let wallet_event = Event::WalletUpdate {
-                locked: self.wallet.locked(),
-                fees: self.wallet.fees_paid(),
-                balance: self.wallet.balance(),
-                free: self.wallet.free_balance()?,
-                pnl: self.wallet.unrealized_pnl(),
-            };
-            self.events.push(wallet_event);
+            self.events.push(Event::from(&self.wallet));
             self.events.push(Event::AddPosition(position));
         }
         Ok(())
@@ -236,16 +257,9 @@ impl Backtest {
         }
         #[cfg(feature = "metrics")]
         {
-            let wallet_event = Event::WalletUpdate {
-                locked: self.wallet.locked(),
-                fees: self.wallet.fees_paid(),
-                balance: self.wallet.balance(),
-                free: self.wallet.free_balance()?,
-                pnl: self.wallet.unrealized_pnl(),
-            };
-            self.events.push(wallet_event);
             let mut position = position.clone();
             position.set_exit_price(exit_price)?;
+            self.events.push(Event::from(&self.wallet));
             self.events.push(Event::DelPosition(position));
         }
         Ok(pnl)
@@ -371,6 +385,7 @@ impl Backtest {
 
         self.positions.append(&mut positions);
         self.wallet.set_unrealized_pnl(total_unrealized_pnl);
+        //? new event wallet
         Ok(())
     }
 
@@ -391,6 +406,64 @@ impl Backtest {
             self.execute_orders(&candle)?;
             self.execute_positions(&candle)?;
             self.index += 1;
+        }
+
+        Ok(())
+    }
+
+    /// Runs the backtest with aggregation, executing the provided function for each candle
+    /// and its aggregated versions.
+    ///
+    /// ### Arguments
+    /// * `aggregator` - An aggregator that defines how to group candles (e.g., by timeframe).
+    /// * `func` - A closure that takes the backtest and a vector of candle references.
+    ///            The vector contains the current candle followed by any aggregated candles.
+    ///
+    /// ### Returns
+    /// Ok if successful, or an error.
+    pub fn run_with_aggregator<A, F>(&mut self, aggregator: &A, mut func: F) -> Result<()>
+    where
+        A: Aggregation,
+        F: FnMut(&mut Self, Vec<&Candle>) -> Result<()>,
+    {
+        use std::collections::HashMap;
+
+        let factors = aggregator.factors();
+        if factors.is_empty() {
+            return Err(Error::InvalidFactor);
+        }
+
+        let mut current_candles = HashMap::new();
+        let mut aggregated_candles_map = HashMap::new();
+
+        // Initialize the map with empty queues for each factor
+        for &factor in factors {
+            current_candles.insert(factor, VecDeque::with_capacity(factor));
+            aggregated_candles_map.insert(factor, VecDeque::with_capacity(factor));
+        }
+
+        let data = self.data.clone(); //todo avoid clone
+        for candle in data.iter() {
+            for (_, deque) in current_candles.iter_mut() {
+                deque.push_back(candle);
+            }
+
+            for (factor, agg) in aggregated_candles_map.iter_mut() {
+                let deque = current_candles.get_mut(factor).expect("should contains candles");
+                let zero = deque.make_contiguous();
+                if aggregator.should_aggregate(*factor, zero) {
+                    let candle = aggregator.aggregate(zero)?;
+                    agg.pop_front();
+                    deque.pop_front();
+                    agg.push_back(candle);
+                }
+            }
+
+            let agg_candles = aggregated_candles_map.values().flatten().collect::<Vec<_>>();
+            func(self, agg_candles)?;
+            self.execute_orders(&candle)?;
+            self.execute_positions(&candle)?;
+            // self.index += 1; // unnecessary inc
         }
 
         Ok(())
