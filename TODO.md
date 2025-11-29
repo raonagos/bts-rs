@@ -12,6 +12,7 @@
 
 ## 📌 In Progress
 ~~- [ ] Add methods to modify orders/positions (update SL/TP/trailing stop)~~
+- [ ] Parameters optimization (with [ta-rs crate](https://crates.io/crates/ta))
 
 ## 🚀 Road to v1.0.0
 
