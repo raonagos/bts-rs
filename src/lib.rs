@@ -172,7 +172,6 @@
 //! ## License
 //! MIT
 #![warn(missing_docs)]
-#![cfg_attr(docsrs, feature(doc_auto_cfg))]
 
 /// Core trading engine components: orders, positions, wallet, and backtest logic.
 pub mod engine;
