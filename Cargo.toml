@@ -1,6 +1,6 @@
 [package]
 name = "bts-rs"
-version = "0.7.0"
+version = "0.7.1"
 edition = "2024"
 description = "Backtest your trading strategy."
 authors = ["tetuaoro <65575727+tetuaoro@users.noreply.github.com>"]
@@ -19,7 +19,6 @@ categories = ["finance", "science", "algorithms"]
 
 [lib]
 name = "bts"
-
 
 [dependencies]
 rand = "0.9.2"
@@ -45,7 +44,7 @@ ta = "0.5.0"
 anyhow = "1.0.100"
 
 [package.metadata.docs.rs]
-all-features = true
+features = ["serde", "metrics", "optimizer"]
 
 [[example]]
 name = "ts"
