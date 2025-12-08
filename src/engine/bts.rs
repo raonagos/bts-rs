@@ -606,7 +606,7 @@ fn scenario_with_aggregator() {
     let mut ic = 0;
     let aggregator = TestAggregator;
     bt.run_with_aggregator(&aggregator, |_, candles| {
-        let candle_one = candles.get(0);
+        let candle_one = candles.first();
         let candle_two = candles.get(1);
 
         // candle_two is none at ic = 0

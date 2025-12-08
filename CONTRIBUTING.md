@@ -5,6 +5,7 @@ Thanks for contributing to **BTS**! Here’s how you can help:
 ---
 
 ## **Reporting Bugs**
+
 Open an **issue** with:
 - Clear description of the bug.
 - Steps to reproduce.
@@ -13,6 +14,7 @@ Open an **issue** with:
 ---
 
 ## **Suggesting Improvements**
+
 Open an **issue** with:
 - Description of your idea.
 - Why it’s useful.

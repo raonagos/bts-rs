@@ -1,115 +1,116 @@
- # BTS: BackTest Strategy
+# BTS: BackTest Strategy
 
- **BTS** is a Rust library designed for backtesting trading strategies on candlestick data.
- It enables testing technical indicators, custom strategies, and simulating trading performance
- on historical or generated data.
+**BTS** is a Rust library designed for backtesting trading strategies on candlestick data.
+It enables testing technical indicators, custom strategies, and simulating trading performance
+on historical or generated data.
 
- ## **Key Features**
+## **Key Features**
 
- - **Technical Indicators**: Uses with popular indicators (Impulse MACD, Parabolic SAR, VWAP, etc.) and allows easy addition of new ones.
- - **Backtesting**: Simulates trading strategies on historical or generated data.
- - **Market Engine**: Processes candles one by one to test strategies under realistic conditions.
- - **Performance Metrics**: Calculates P&L (Profit & Loss), drawdown, Sharpe ratio, and more.
- - **Flexibility**: Compatible with indicators crates for seamless integration.
- - **Order & Position Management**: Supports market orders, limit orders, take-profit,
-   stop-loss, and trailing stops.
+- **Technical Indicators**: Uses with popular indicators (Impulse MACD, Parabolic SAR, VWAP, etc.) and allows easy addition of new ones.
+- **Backtesting**: Simulates trading strategies on historical or generated data.
+- **Market Engine**: Processes candles one by one to test strategies under realistic conditions.
+- **Performance Metrics**: Calculates P&L (Profit & Loss), drawdown, Sharpe ratio, and more.
+- **Flexibility**: Compatible with indicators crates for seamless integration.
+- **Order & Position Management**: Supports market orders, limit orders, take-profit,
+  stop-loss, and trailing stops.
 
- ## **Core Concepts**
+## **Core Concepts**
 
- ### **Candle**
- Represents a candlestick with OHLCV data (Open, High, Low, Close, Volume).
- Used as the basic unit for market data.
+### **Candle**
 
- ### **Order**
- Represents a trading order (buy or sell) with a specific type (market, limit, etc.).
- Orders can be placed and executed based on market conditions.
+Represents a candlestick with OHLCV data (Open, High, Low, Close, Volume).
+Used as the basic unit for market data.
 
- ### **Position**
- Represents an open market position with exit rules (take-profit, stop-loss, trailing stop).
- Positions are managed by the backtesting engine.
+### **Order**
 
- ### **Event**
- Records backtest events (order/position additions/removals) for detailed tracking.
+Represents a trading order (buy or sell) with a specific type (market, limit, etc.).
+Orders can be placed and executed based on market conditions.
 
- ## **Usage Example**
+### **Position**
 
- ```rust
- use bts_rs::prelude::*;
+Represents an open market position with exit rules (take-profit, stop-loss, trailing stop).
+Positions are managed by the backtesting engine.
 
- // Candlestick data
- let data = vec![
-     Candle::from((100.0, 110.0, 95.0, 105.0, 1000.0)),
-     Candle::from((105.0, 115.0, 100.0, 110.0, 1000.0)),
- ];
+### **Event**
 
- // Initialize backtest
- let mut bts = Backtest::new(data, 1000.0).unwrap();
+Records backtest events (order/position additions/removals) for detailed tracking.
 
- // Custom strategy
- bts.run(|bt, candle| {
-     // Example: Buy if closing price > opening price
-     if candle.close() > candle.open() {
-         let order = Order::from((OrderType::Market(candle.close()), 1.0, OrderSide::Buy));
-         bt.place_order(order)?;
-     }
-     Ok(())
- }).unwrap();
+## **Usage Example**
+```rust
+use bts_rs::prelude::*;
 
- // Results
- println!("Final balance: {}", bts.balance());
- println!("Number of positions: {}", bts.positions().count());
- println!("Number of events: {}", bts.events().count());
- ```
+// Candlestick data
+let data = vec![
+    Candle::from((100.0, 110.0, 95.0, 105.0, 1000.0)),
+    Candle::from((105.0, 115.0, 100.0, 110.0, 1000.0)),
+];
 
- ## **Performance Metrics**
+// Initialize backtest
+let mut bts = Backtest::new(data, 1000.0, None).unwrap();
 
- The backtesting engine automatically calculates the following metrics:
- - **Profit & Loss (P&L)**: Total profits or losses.
- - **Drawdown**: Maximum capital decline.
- - **Sharpe Ratio**: Risk-adjusted return measure.
- - **Win Rate**: Percentage of winning trades.
+// Custom strategy
+bts.run(|bt, candle| {
+    // Example: Buy if closing price > opening price
+    if candle.close() > candle.open() {
+        let order = Order::from((OrderType::Market(candle.close()), 1.0, OrderSide::Buy));
+        bt.place_order(order)?;
+    }
+    Ok(())
+}).unwrap();
 
- ## **Integration with Other Crates**
+// Results
+println!("Final balance: {}", bts.balance());
+println!("Number of positions: {}", bts.positions().count());
+println!("Number of events: {}", bts.events().count());
+```
 
- BTS is compatible with popular indicators crates for technical analysis, allowing you to easily integrate your trading strategy.
+## **Performance Metrics**
 
- ## **Advanced Features**
+The backtesting engine automatically calculates the following metrics:
+- **Profit & Loss (P&L)**: Total profits or losses.
+- **Drawdown**: Maximum capital decline.
+- **Sharpe Ratio**: Risk-adjusted return measure.
+- **Win Rate**: Percentage of winning trades.
 
- - **Custom Strategies**: Implement your own trading logic.
- - **Event Tracking**: Detailed logging of all trading events.
- - **Risk Management**: Built-in support for stop-loss and take-profit rules.
- - **Performance Optimization**: Uses efficient data structures for order/position management.
- - **Parameters Optimization**: Computes the best parameters *(indicators, RR, etc...)* for your strategy.
+## **Integration with Other Crates**
 
- ## **Error Handling**
+BTS is compatible with popular indicators crates for technical analysis, allowing you to easily integrate your trading strategy.
 
- BTS provides comprehensive error handling for:
- - Insufficient funds
- - Invalid orders/positions
- - Market data errors
- - Configuration issues
+## **Advanced Features**
 
- ## **Getting Started**
+- **Custom Strategies**: Implement your own trading logic.
+- **Event Tracking**: Detailed logging of all trading events.
+- **Risk Management**: Built-in support for stop-loss and take-profit rules.
+- **Performance Optimization**: Uses efficient data structures for order/position management.
+- **Parameters Optimization**: Computes the best parameters *(indicators, RR, etc...)* for your strategy.
 
- Add BTS to your `Cargo.toml`:
+## **Error Handling**
 
- ```toml
- [dependencies]
- bts_rs = "0.8"
- ```
+BTS provides comprehensive error handling for:
+- Insufficient funds
+- Invalid orders/positions
+- Market data errors
+- Configuration issues
 
- Then import and use it in your project:
+## **Getting Started**
 
- ```rust
- use bts_rs::prelude::*;
- ```
+Add BTS to your `Cargo.toml`:
+```toml
+[dependencies]
+bts_rs = "0.8"
+```
 
- ## Contributing
+Then import and use it in your project:
+```rust
+use bts_rs::prelude::*;
+```
 
- See [Contributing](CONTRIBUTING.md) file to contribute to this project.
+## Contributing
 
- ## **License**
+See [Contributing](CONTRIBUTING.md) file to contribute to this project.
 
- This project is licensed under the [MIT License](LICENSE).
+## **License**
+
+This project is licensed under the [MIT License](LICENSE).
 
 *Generated by Mistral.ai*

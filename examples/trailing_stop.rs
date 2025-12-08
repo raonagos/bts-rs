@@ -6,12 +6,7 @@
 mod utils;
 
 use bts_rs::prelude::*;
-use ta::{
-    indicators::{
-        ExponentialMovingAverage, MovingAverageConvergenceDivergence, MovingAverageConvergenceDivergenceOutput,
-    },
-    *,
-};
+use ta::{indicators::*, *};
 
 fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let candles = utils::example_candles();
@@ -43,14 +38,6 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         Ok(())
     })?;
 
-    #[cfg(feature = "metrics")]
-    {
-        use crate::utils::print_metrics;
-
-        let metrics = Metrics::from(&bts);
-        print_metrics(&metrics, initial_balance);
-    }
-
     #[cfg(not(feature = "metrics"))]
     {
         let first_price = candles.first().unwrap().close();
@@ -68,6 +55,25 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         let buy_and_hold = (initial_balance / first_price) * last_price;
         let buy_and_hold_perf = first_price.change(last_price);
         println!("buy and hold {buy_and_hold:.2} ({buy_and_hold_perf:.2}%)");
+    }
+
+    #[cfg(feature = "metrics")]
+    {
+        use crate::utils::print_metrics;
+
+        let metrics = Metrics::from(&bts);
+        print_metrics(&metrics, initial_balance);
+    }
+
+    #[cfg(feature = "draws")]
+    {
+        let options = DrawOptions::default()
+            .draw_output(DrawOutput::Svg("../bts.svg"))
+            .show_volume(true);
+        #[cfg(feature = "metrics")]
+        let options = options.show_metrics(true);
+        let draw = Draw::with_backtest(&bts).with_options(options);
+        draw.plot()?;
     }
 
     Ok(())

@@ -15,9 +15,9 @@ const END: usize = 13;
 struct Parameters;
 
 impl ParameterCombination for Parameters {
-    type T = (usize, usize, usize, usize);
+    type Output = (usize, usize, usize, usize);
 
-    fn generate() -> Vec<Self::T> {
+    fn generate() -> Vec<Self::Output> {
         let min = START;
         let max = END;
         (min..=max)

@@ -130,17 +130,17 @@ pub enum Error {
     #[error("{0}")]
     Fmt(#[from] std::fmt::Error),
 
-    /// An error with serde json crate.
+    /// An error with plotters crate.
     ///
     /// ### Arguments
-    /// * `0` - The underlying serde_json error.
+    /// * `0` - The underlying plotters error.
     #[cfg(feature = "draws")]
     #[error("{0}")]
-    SerdeJson(#[from] serde_json::Error),
+    Plotters(String),
 
     /// A mutex was poisoned.
     #[error("{0}")]
-    MutexPoisoned(String),
+    Mutex(String),
 }
 
 #[cfg(feature = "serde")]

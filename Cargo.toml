@@ -33,7 +33,6 @@ getrandom = "0.3.4"
 
 # also update the doc feature below
 [features]
-default = ["draws"]
 metrics = []
 serde = ["chrono/serde", "dep:serde"]
 optimizer = ["dep:rayon", "dep:num_cpus"]
@@ -41,7 +40,7 @@ draws = ["dep:plotters", "dep:serde_json"]
 wasm = ["rayon/web_spin_lock", "getrandom/wasm_js"]
 
 [package.metadata.docs.rs]
-all-features = true
+features = ["metrics", "optimizer", "draws"]
 
 [dev-dependencies]
 ta = "0.5.0"

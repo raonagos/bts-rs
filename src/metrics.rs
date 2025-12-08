@@ -15,6 +15,8 @@ use std::fmt;
 
 use crate::engine::*;
 
+use chrono::{DateTime, Utc};
+
 /// Events generated during a backtest.
 ///
 /// Each event corresponds to an action or state change, such as:
@@ -27,28 +29,30 @@ pub enum Event {
     /// An order has been added to the backtest.
     ///
     /// This event is triggered when a new order is created and added to the order queue.
-    AddOrder(Order),
+    AddOrder(DateTime<Utc>, Order),
 
     /// An order has been removed from the backtest.
     ///
     /// This event is triggered when an order is canceled or executed.
-    DelOrder(Order),
+    DelOrder(DateTime<Utc>, Order),
 
     /// A position has been opened.
     ///
     /// This event is triggered when an order is executed and a new position is created.
-    AddPosition(Position),
+    AddPosition(DateTime<Utc>, Position),
 
     /// A position has been closed.
     ///
     /// This event is triggered when a position is closed, either manually or by an exit rule.
-    DelPosition(Position),
+    DelPosition(DateTime<Utc>, Position),
 
     /// The wallet balance has been updated.
     ///
     /// This event is triggered after each trade or fee deduction.
     /// It contains the current state of the wallet.
     WalletUpdate {
+        /// Moment
+        timestamp: DateTime<Utc>,
         /// Realized profit and loss.
         pnl: f64,
         /// Total fees paid.
@@ -62,9 +66,10 @@ pub enum Event {
     },
 }
 
-impl From<&Wallet> for Event {
-    fn from(value: &Wallet) -> Self {
+impl From<(DateTime<Utc>, &Wallet)> for Event {
+    fn from((timestamp, value): (DateTime<Utc>, &Wallet)) -> Self {
         Self::WalletUpdate {
+            timestamp,
             locked: value.locked(),
             fees: value.fees_paid(),
             balance: value.balance(),
@@ -80,7 +85,6 @@ impl From<&Wallet> for Event {
 /// for a trading strategy, such as max drawdown, profit factor, Sharpe ratio, and win rate.
 /// It is typically constructed from a `Backtest` or a list of `Event`s.
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[derive(Debug)]
 pub struct Metrics {
     events: Vec<Event>,
     initial_balance: f64,
@@ -136,7 +140,7 @@ impl Metrics {
         let mut total_losses = 0.0;
 
         for event in &self.events {
-            if let Event::DelPosition(position) = event {
+            if let Event::DelPosition(_, position) = event {
                 let pnl = position.pnl().expect("pnl should be set the last exit price");
                 if pnl > 0.0 {
                     total_gains += pnl;
@@ -181,7 +185,7 @@ impl Metrics {
         let mut total_trades = 0;
 
         for event in &self.events {
-            if let Event::DelPosition(position) = event {
+            if let Event::DelPosition(_, position) = event {
                 total_trades += 1;
                 if position.pnl().expect("pnl should be set the last exit price") > 0.0 {
                     winning_trades += 1;
@@ -226,6 +230,7 @@ fn create_position(pnl: f64) -> Position {
 fn max_drawdown() {
     let events = vec![
         Event::WalletUpdate {
+            timestamp: DateTime::default(),
             pnl: 0.0,
             fees: 0.0,
             free: 10000.0,
@@ -233,6 +238,7 @@ fn max_drawdown() {
             balance: 10000.0,
         },
         Event::WalletUpdate {
+            timestamp: DateTime::default(),
             pnl: 0.0,
             fees: 0.0,
             free: 12000.0,
@@ -240,6 +246,7 @@ fn max_drawdown() {
             balance: 12000.0,
         },
         Event::WalletUpdate {
+            timestamp: DateTime::default(),
             pnl: 0.0,
             fees: 0.0,
             free: 9000.0,
@@ -247,6 +254,7 @@ fn max_drawdown() {
             balance: 9000.0,
         },
         Event::WalletUpdate {
+            timestamp: DateTime::default(),
             pnl: 0.0,
             fees: 0.0,
             free: 11000.0,
@@ -271,8 +279,8 @@ fn profit_factor() {
     let winning_position = create_position(20.0);
     let losing_position = create_position(-10.0);
     let events = vec![
-        Event::DelPosition(winning_position),
-        Event::DelPosition(losing_position),
+        Event::DelPosition(DateTime::default(), winning_position),
+        Event::DelPosition(DateTime::default(), losing_position),
     ];
     let metrics = Metrics::new(events, 10000.0);
     assert_eq!(metrics.profit_factor(), 2.0); // 20 / 10 = 2.0
@@ -282,7 +290,7 @@ fn profit_factor() {
 #[test]
 fn profit_factor_no_losses() {
     let winning_position = create_position(20.0);
-    let events = vec![Event::DelPosition(winning_position)];
+    let events = vec![Event::DelPosition(DateTime::default(), winning_position)];
     let metrics = Metrics::new(events, 10000.0);
     assert_eq!(metrics.profit_factor(), f64::INFINITY); // No losses
 }
@@ -299,6 +307,8 @@ fn profit_factor_no_trades() {
 fn sharpe_ratio() {
     let events = vec![
         Event::WalletUpdate {
+            timestamp: DateTime::default(),
+
             pnl: 0.0,
             fees: 0.0,
             free: 10000.0,
@@ -306,6 +316,7 @@ fn sharpe_ratio() {
             balance: 10000.0,
         },
         Event::WalletUpdate {
+            timestamp: DateTime::default(),
             pnl: 0.0,
             fees: 0.0,
             free: 10500.0,
@@ -313,6 +324,7 @@ fn sharpe_ratio() {
             balance: 10500.0,
         },
         Event::WalletUpdate {
+            timestamp: DateTime::default(),
             pnl: 0.0,
             fees: 0.0,
             free: 10300.0,
@@ -320,6 +332,7 @@ fn sharpe_ratio() {
             balance: 10300.0,
         },
         Event::WalletUpdate {
+            timestamp: DateTime::default(),
             pnl: 0.0,
             fees: 0.0,
             free: 10700.0,
@@ -347,8 +360,8 @@ fn win_rate() {
     let winning_position = create_position(20.0);
     let losing_position = create_position(-10.0);
     let events = vec![
-        Event::DelPosition(winning_position),
-        Event::DelPosition(losing_position),
+        Event::DelPosition(DateTime::default(), winning_position),
+        Event::DelPosition(DateTime::default(), losing_position),
     ];
     let metrics = Metrics::new(events, 10000.0);
     assert_eq!(metrics.win_rate(), 50.0); // 1 win out of 2 trades
@@ -365,7 +378,7 @@ fn win_rate_no_trades() {
 #[test]
 fn win_rate_all_winning() {
     let winning_position = create_position(20.0);
-    let events = vec![Event::DelPosition(winning_position)];
+    let events = vec![Event::DelPosition(DateTime::default(), winning_position)];
     let metrics = Metrics::new(events, 10000.0);
     assert_eq!(metrics.win_rate(), 100.0); // 1 win out of 1 trade
 }

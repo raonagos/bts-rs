@@ -16,15 +16,15 @@ use rayon::prelude::*;
 ///
 /// Implement this trait for your parameter types to define how combinations should be generated.
 /// The associated type `P` represents a single parameter combination (e.g., a tuple of values).
-pub trait ParameterCombination {
+pub trait ParameterCombination: Sync {
     /// Type representing a single parameter combination (e.g., `(usize, f64)`).
-    type T: Clone + Send + Sync;
+    type Output: Clone + Send + Sync;
 
     /// Generates all possible parameter combinations to test.
     ///
     /// # Returns
     /// A vector containing all parameter combinations.
-    fn generate() -> Vec<Self::T>;
+    fn generate() -> Vec<Self::Output>;
 }
 
 /// Optimizer for testing trading strategies with different parameter combinations.
@@ -32,14 +32,25 @@ pub trait ParameterCombination {
 /// This struct handles the execution of backtests for each parameter combination,
 /// collecting results for analysis.
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct Optimizer<PS: ParameterCombination> {
+pub struct Optimizer<PC: ParameterCombination> {
     data: Vec<Candle>,
     initial_balance: f64,
-    _marker: PhantomData<PS>,
+    _marker: PhantomData<PC>,
     market_fees: Option<(f64, f64)>,
 }
 
-impl<PS: ParameterCombination> Optimizer<PS> {
+impl<PC: ParameterCombination> From<&Backtest> for Optimizer<PC> {
+    fn from(value: &Backtest) -> Self {
+        Self {
+            _marker: PhantomData,
+            data: value.candles().cloned().collect(),
+            initial_balance: value.initial_balance(),
+            market_fees: value.market_fees().copied(),
+        }
+    }
+}
+
+impl<PC: ParameterCombination> Optimizer<PC> {
     /// Creates a new `Optimizer` with the given data and initial balance.
     ///
     /// # Arguments
@@ -61,7 +72,7 @@ impl<PS: ParameterCombination> Optimizer<PS> {
     /// Optimizes a trading strategy by testing all parameter combinations.
     ///
     /// # Arguments
-    /// * `transformers` - Function that converts a parameter combination into strategy-specific parameters.
+    /// * `combinator` - Function that converts a parameter combination into strategy-specific parameters.
     /// * `strategy` - Trading strategy function to test.
     ///
     /// # Returns
@@ -69,45 +80,37 @@ impl<PS: ParameterCombination> Optimizer<PS> {
     ///
     /// # Errors
     /// Returns an error if backtest execution fails.
-    pub fn with<T, TR, S>(&self, transformers: TR, strategy: S) -> Result<Vec<(PS::T, f64)>>
+    pub fn with<T, C, S>(&self, combinator: C, strategy: S) -> Result<Vec<(PC::Output, f64)>>
     where
         T: Clone,
-        PS: Sync,
-        TR: Fn(&PS::T) -> Result<T> + Sync,
+        C: Fn(&PC::Output) -> Result<T> + Sync,
         S: FnMut(&mut Backtest, &mut T, &Candle) -> Result<()> + Send,
     {
         let num_cpus = num_cpus::get();
+        let combinations = PC::generate();
         let strategy = Arc::new(Mutex::new(strategy));
-        let combinations = PS::generate();
-        let chunk_size = ((combinations.len() + num_cpus - 1) / num_cpus).max(1);
+        let chunk_size = combinations.len().div_ceil(num_cpus).max(1);
 
-        let chunk_results = combinations
+        combinations
             .par_chunks(chunk_size)
             .map::<_, Result<_>>(|par_combinations| {
                 let mut backtest = Backtest::new(self.data.clone(), self.initial_balance, self.market_fees)?;
                 let mut local_results = Vec::with_capacity(par_combinations.len());
 
                 let strategy_arc = Arc::clone(&strategy);
-                let mut strategy_guard = strategy_arc.lock().map_err(|e| Error::MutexPoisoned(e.to_string()))?;
+                let mut strategy_guard = strategy_arc.lock().map_err(|e| Error::Mutex(e.to_string()))?;
 
                 for param_set in par_combinations {
-                    let mut transformer = transformers(param_set)?;
-                    backtest.run(|bt, candle| strategy_guard(bt, &mut transformer, candle))?;
+                    let mut output = combinator(param_set)?;
+                    backtest.run(|bt, candle| strategy_guard(bt, &mut output, candle))?;
                     local_results.push((param_set.clone(), backtest.total_balance()));
                     backtest.reset();
                 }
 
                 Ok(local_results)
             })
-            .collect::<Vec<_>>();
-
-        let mut results = Vec::with_capacity(combinations.len());
-        for chunk_result in chunk_results {
-            let chunk = chunk_result?;
-            results.extend(chunk);
-        }
-
-        Ok(results)
+            .collect::<Result<Vec<_>>>()
+            .map(|chunks| chunks.into_iter().flatten().collect())
     }
 }
 
@@ -117,9 +120,9 @@ struct Parameters;
 
 #[cfg(test)]
 impl ParameterCombination for Parameters {
-    type T = (usize, usize, usize, usize);
+    type Output = (usize, usize, usize, usize);
 
-    fn generate() -> Vec<Self::T> {
+    fn generate() -> Vec<Self::Output> {
         let min = 8;
         let max = 13;
         (min..=max)
@@ -175,42 +178,45 @@ fn get_data() -> Vec<Candle> {
 #[test]
 fn optimizer_with_ema_macd() {
     use crate::prelude::*;
-    use ta::*;
     use ta::indicators::{
         ExponentialMovingAverage, MovingAverageConvergenceDivergence, MovingAverageConvergenceDivergenceOutput,
     };
+    use ta::*;
 
     let candles = get_data();
     let initial_balance = 1_000.0;
 
     let opt = Optimizer::<Parameters>::new(candles.clone(), initial_balance, None);
 
-    let result = opt.with(
-        |&(ema_period, m1, m2, m3)| {
-            let ema = ExponentialMovingAverage::new(ema_period).map_err(|e| Error::Msg(e.to_string()))?;
-            let macd = MovingAverageConvergenceDivergence::new(m1, m2, m3).map_err(|e| Error::Msg(e.to_string()))?;
-            Ok((ema, macd))
-        },
-        |bt, (ema, macd), candle| {
-            let close = candle.close();
-            let output = ema.next(close);
-            let MovingAverageConvergenceDivergenceOutput { histogram, .. } = macd.next(close);
-            let balance = bt.free_balance()?;
-            let amount = balance.how_many(2.0).max(21.0);
+    let result = opt
+        .with(
+            |&(ema_period, m1, m2, m3)| {
+                let ema = ExponentialMovingAverage::new(ema_period).map_err(|e| Error::Msg(e.to_string()))?;
+                let macd =
+                    MovingAverageConvergenceDivergence::new(m1, m2, m3).map_err(|e| Error::Msg(e.to_string()))?;
+                Ok((ema, macd))
+            },
+            |bt, (ema, macd), candle| {
+                let close = candle.close();
+                let output = ema.next(close);
+                let MovingAverageConvergenceDivergenceOutput { histogram, .. } = macd.next(close);
+                let balance = bt.free_balance()?;
+                let amount = balance.how_many(2.0).max(21.0);
 
-            if balance > (initial_balance / 2.0) && close > output && histogram > 0.0 {
-                let quantity = amount / close;
-                let order = (
-                    OrderType::Market(close),
-                    OrderType::TrailingStop(close, 2.0),
-                    quantity,
-                    OrderSide::Buy,
-                );
-                bt.place_order(order.into())?;
-            }
-            Ok(())
-        },
-    ).unwrap();
+                if balance > (initial_balance / 2.0) && close > output && histogram > 0.0 {
+                    let quantity = amount / close;
+                    let order = (
+                        OrderType::Market(close),
+                        OrderType::TrailingStop(close, 2.0),
+                        quantity,
+                        OrderSide::Buy,
+                    );
+                    bt.place_order(order.into())?;
+                }
+                Ok(())
+            },
+        )
+        .unwrap();
 
     assert!(!result.is_empty(), "No optimization results returned");
 }

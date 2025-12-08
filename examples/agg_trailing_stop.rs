@@ -6,12 +6,7 @@
 mod utils;
 
 use bts_rs::prelude::*;
-use ta::{
-    indicators::{
-        ExponentialMovingAverage, MovingAverageConvergenceDivergence, MovingAverageConvergenceDivergenceOutput,
-    },
-    *,
-};
+use ta::{indicators::*, *};
 
 fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let candles = utils::example_candles();
@@ -28,9 +23,8 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    let aggregator = TimeframeAggregator;
-    bts.run_with_aggregator(&aggregator, |bt, candles| {
-        let candle_one = candles.get(0).ok_or(Error::CandleNotFound)?;
+    bts.run_with_aggregator(&TimeframeAggregator, |bt, candles| {
+        let candle_one = candles.first().ok_or(Error::CandleNotFound)?;
         let _candle_four = candles.get(1);
         let _candle_eight = candles.get(2);
 
@@ -59,14 +53,6 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         Ok(())
     })?;
 
-    #[cfg(feature = "metrics")]
-    {
-        use crate::utils::print_metrics;
-
-        let metrics = Metrics::from(&bts);
-        print_metrics(&metrics, initial_balance);
-    }
-
     #[cfg(not(feature = "metrics"))]
     {
         let first_price = candles.first().unwrap().close();
@@ -84,6 +70,23 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         let buy_and_hold = (initial_balance / first_price) * last_price;
         let buy_and_hold_perf = first_price.change(last_price);
         println!("buy and hold {buy_and_hold:.2} ({buy_and_hold_perf:.2}%)");
+    }
+
+    #[cfg(feature = "metrics")]
+    {
+        use crate::utils::print_metrics;
+
+        let metrics = Metrics::from(&bts);
+        print_metrics(&metrics, initial_balance);
+    }
+
+    #[cfg(feature = "draws")]
+    {
+        let options = DrawOptions::default()
+            .draw_output(DrawOutput::Svg("../bts.svg"))
+            .show_volume(true);
+        let draw = Draw::with_backtest(&bts).with_options(options);
+        draw.plot()?;
     }
 
     Ok(())

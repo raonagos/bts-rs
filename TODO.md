@@ -17,8 +17,11 @@
 ~~- [ ] Add methods to modify orders/positions (update SL/TP/trailing stop)~~
 ~~- [ ] Multi-strategy parallel execution~~
 - [ ] Automated report generation (PDF/HTML)
+- [ ] Tracing and Progress when running strategy
 
 ## 🚀 Road to v1.0.0
+- [ ] Optimize by remove unwrap and clone
+- [ ] Write better docs, examples and tests
 
 ### Core Features
 

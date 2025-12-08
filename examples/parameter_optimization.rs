@@ -26,7 +26,7 @@ mod utils;
 use std::cmp::Ordering;
 
 use bts_rs::prelude::*;
-use ta::{indicators::ExponentialMovingAverage, *};
+use ta::{indicators::*, *};
 
 fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let candles = utils::example_candles();

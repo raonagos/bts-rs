@@ -84,7 +84,6 @@ pub trait Aggregation {
 
 /// Backtesting engine for trading strategies.
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[derive(Debug)]
 pub struct Backtest {
     index: usize,
     wallet: Wallet,
@@ -127,10 +126,10 @@ impl Backtest {
             return Err(Error::CandleDataEmpty);
         }
 
-        if let Some((market_fee, limit_fee)) = market_fees {
-            if market_fee <= 0.0 || limit_fee <= 0.0 {
-                return Err(Error::NegZeroFees);
-            }
+        if let Some((market_fee, limit_fee)) = market_fees
+            && (market_fee <= 0.0 || limit_fee <= 0.0)
+        {
+            return Err(Error::NegZeroFees);
         }
 
         Ok(Self {
@@ -143,6 +142,11 @@ impl Backtest {
             positions: VecDeque::new(),
             wallet: Wallet::new(initial_balance)?,
         })
+    }
+
+    /// Returns the market fees.
+    pub fn market_fees(&self) -> Option<&(f64, f64)> {
+        self.market_fees.as_ref()
     }
 
     /// Returns an iterator over the data.
@@ -178,8 +182,9 @@ impl Backtest {
         self.orders.push_back(order.clone());
         #[cfg(feature = "metrics")]
         {
-            self.events.push(Event::from(&self.wallet));
-            self.events.push(Event::AddOrder(order));
+            let open_time = self.data.get(self.index).ok_or(Error::CandleNotFound)?.open_time();
+            self.events.push(Event::from((open_time, &self.wallet)));
+            self.events.push(Event::AddOrder(open_time, order));
         }
         Ok(())
     }
@@ -203,8 +208,9 @@ impl Backtest {
         self.wallet.unlock(order.cost()?)?;
         #[cfg(feature = "metrics")]
         {
-            self.events.push(Event::from(&self.wallet));
-            self.events.push(Event::DelOrder(order.clone()));
+            let open_time = self.data.get(self.index).ok_or(Error::CandleNotFound)?.open_time();
+            self.events.push(Event::from((open_time, &self.wallet)));
+            self.events.push(Event::DelOrder(open_time, order.clone()));
         }
         Ok(())
     }
@@ -222,8 +228,9 @@ impl Backtest {
         self.positions.push_back(position.clone());
         #[cfg(feature = "metrics")]
         {
-            self.events.push(Event::from(&self.wallet));
-            self.events.push(Event::AddPosition(position));
+            let open_time = self.data.get(self.index).ok_or(Error::CandleNotFound)?.open_time();
+            self.events.push(Event::from((open_time, &self.wallet)));
+            self.events.push(Event::AddPosition(open_time, position));
         }
         Ok(())
     }
@@ -265,8 +272,9 @@ impl Backtest {
         {
             let mut position = position.clone();
             position.set_exit_price(exit_price)?;
-            self.events.push(Event::from(&self.wallet));
-            self.events.push(Event::DelPosition(position));
+            let open_time = self.data.get(self.index).ok_or(Error::CandleNotFound)?.open_time();
+            self.events.push(Event::from((open_time, &self.wallet)));
+            self.events.push(Event::DelPosition(open_time, position));
         }
         Ok(pnl)
     }
@@ -423,7 +431,8 @@ impl Backtest {
     /// ### Arguments
     /// * `aggregator` - An aggregator that defines how to group candles (e.g., by timeframe).
     /// * `strategy` - A closure that takes the backtest and a vector of candle references.
-    ///            The vector contains the current candle followed by any aggregated candles.
+    ///
+    /// The vector contains the current candle followed by any aggregated candles.
     ///
     /// ### Returns
     /// Ok if successful, or an error.
