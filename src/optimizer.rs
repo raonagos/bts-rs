@@ -74,7 +74,7 @@ impl<PC: ParameterCombination> Optimizer<PC> {
     /// # Arguments
     /// * `combinator` - Function that converts a parameter combination into strategy-specific parameters.
     /// * `strategy` - Trading strategy function to test.
-    /// * `filter` - Function that allow you to return anything in backtest instance (e.g. its balance, its events)
+    /// * `filter` - Function that takes a reference to its backtest instance and returns an `Option` of `R`.
     ///
     /// # Returns
     /// A vector of tuples containing each parameter combination and its resulting balance.
@@ -87,7 +87,7 @@ impl<PC: ParameterCombination> Optimizer<PC> {
         R: Clone + Send,
         C: Fn(&PC::Output) -> Result<T> + Sync,
         S: FnMut(&mut Backtest, &mut T, &Candle) -> Result<()> + Send,
-        F: Fn(&Backtest) -> R + Send + Sync,
+        F: Fn(&Backtest) -> Option<R> + Send + Sync,
     {
         let num_cpus = num_cpus::get();
         let combinations = PC::generate();
@@ -111,7 +111,9 @@ impl<PC: ParameterCombination> Optimizer<PC> {
                     let mut output = combinator(param_set)?;
                     backtest.run(|bt, candle| strategy_guard(bt, &mut output, candle))?;
                     let result = filter_arc(&backtest);
-                    local_results.push((param_set.clone(), result));
+                    if let Some(r) = result {
+                        local_results.push((param_set.clone(), r));
+                    }
                     backtest.reset();
                 }
 
@@ -138,7 +140,7 @@ impl<PC: ParameterCombination> Optimizer<PC> {
         C: Fn(&PC::Output) -> Result<T> + Sync,
         S: FnMut(&mut Backtest, &mut T, &Candle) -> Result<()> + Send,
     {
-        self.with_filter(combinator, strategy, |b| b.clone())
+        self.with_filter(combinator, strategy, |b| Some(b.clone()))
     }
 }
 
@@ -270,7 +272,10 @@ fn optimizer_with_ema_macd() {
             }
             Ok(())
         },
-        |b| b.orders().copied().collect::<Vec<_>>(),
+        |b| {
+            let orders = b.orders().copied().collect::<Vec<_>>();
+            Some(orders)
+        },
     )
     .unwrap();
 }

@@ -64,7 +64,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             }
             Ok(())
         },
-        |b| b.balance(),
+        |b| Some(b.balance()),
     )?;
 
     let mut result_with_sum = result
