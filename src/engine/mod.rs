@@ -11,7 +11,10 @@ mod order;
 mod position;
 mod wallet;
 
-use std::collections::{VecDeque, vec_deque::Iter};
+use std::{
+    collections::{VecDeque, vec_deque::Iter},
+    sync::Arc,
+};
 
 use crate::{
     PercentCalculus,
@@ -88,6 +91,7 @@ pub struct Backtest {
     index: usize,
     wallet: Wallet,
     data: Vec<Candle>,
+    data_array: Arc<[Candle]>,
     #[cfg(feature = "metrics")]
     events: Vec<Event>,
     orders: VecDeque<Order>,
@@ -132,9 +136,12 @@ impl Backtest {
             return Err(Error::NegZeroFees);
         }
 
+        let data_array = Arc::from_iter(data.clone());
+
         Ok(Self {
             data,
             index: 0,
+            data_array,
             market_fees,
             #[cfg(feature = "metrics")]
             events: Vec::new(),
@@ -437,6 +444,20 @@ impl Backtest {
             self.index += 1;
         }
 
+        Ok(())
+    }
+
+    /// Like `run` but better.
+    pub fn run_as_arc<S>(&mut self, mut strategy: S) -> Result<()>
+    where
+        S: FnMut(&mut Self, &Candle) -> Result<()>,
+    {
+        let candles = Arc::clone(&self.data_array);
+        for candle in candles.iter() {
+            strategy(self, candle)?;
+            self.execute_orders(candle)?;
+            self.execute_positions(candle)?;
+        }
         Ok(())
     }
 
