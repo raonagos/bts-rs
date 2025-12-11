@@ -1,4 +1,6 @@
 //! Module for visualizing backtest results and candle charts.
+//!
+//! It needs to enable `draws` feature to use it. Take a look at [trailing stop](https://github.com/raonagos/bts-rs/blob/master/examples/trailing_stop.rs#L70) for example.
 
 use crate::engine::{Backtest, Candle};
 use crate::errors::{Error, Result};
@@ -19,20 +21,22 @@ const X_LABEL_SIZE: i32 = 20;
 const Y_LABEL_SIZE: i32 = 20;
 
 /// Output formats for the generated charts with output filename.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Default)]
 pub enum DrawOutput {
     /// Save to the output SVG file.
-    Svg(&'static str),
+    Svg(String),
     /// Save to the output PNG file.
-    Png(&'static str),
+    Png(String),
     /// Save to the output HTML file (not implemented).
-    Html(&'static str),
+    Html(String),
     /// Print to the current console (not implemented).
     #[default]
     Inner,
 }
 
 /// Configuration options for chart generation.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Default)]
 pub struct DrawOptions {
     /// Chart title.
@@ -74,20 +78,33 @@ impl DrawOptions {
 }
 
 /// Chart drawing utility for backtest visualization.
-#[derive(Default)]
-pub struct Draw<'d> {
-    /// Reference to the backtest data.
-    backtest: Option<&'d Backtest>,
-    /// Drawing options.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct Draw {
+    candles: Vec<Candle>,
+    #[cfg(feature = "metrics")]
+    metrics: Metrics,
     options: DrawOptions,
 }
 
-impl<'d> Draw<'d> {
-    /// Creates a new `Draw` instance with the given backtest.
-    pub fn with_backtest(backtest: &'d Backtest) -> Self {
+impl From<&Backtest> for Draw {
+    fn from(value: &Backtest) -> Self {
         Self {
-            backtest: Some(backtest),
             options: DrawOptions::default(),
+            #[cfg(feature = "metrics")]
+            metrics: Metrics::from(value),
+            candles: value.candles().cloned().collect(),
+        }
+    }
+}
+
+impl Draw {
+    /// Creates a new `Draw` instance.
+    pub fn new(candles: Vec<Candle>, options: DrawOptions, #[cfg(feature = "metrics")] metrics: Metrics) -> Self {
+        Self {
+            candles,
+            #[cfg(feature = "metrics")]
+            metrics,
+            options,
         }
     }
 
@@ -99,8 +116,7 @@ impl<'d> Draw<'d> {
 
     /// Generates and saves the chart based on the configured options.
     pub fn plot(&self) -> Result<()> {
-        let backtest = self.backtest.ok_or(Error::Msg("No backtest provided".to_string()))?;
-        let candles = backtest.candles().collect::<Vec<_>>();
+        let candles = &self.candles;
         if candles.is_empty() {
             return Err(Error::CandleDataEmpty);
         }
@@ -119,76 +135,59 @@ impl<'d> Draw<'d> {
         let width = 1280.max(10 * candle_count);
         let height = ((width as f64 * ASPECT_RATIO * height_factor) as u32).min(900);
 
-        match self.options.output {
-            DrawOutput::Svg(path) => self.plot_svg(path, &candles, width, height, title),
-            DrawOutput::Png(path) => self.plot_png(path, &candles, width, height, title),
-            DrawOutput::Html(path) => self.plot_html(path, &candles, width, height, title),
-            DrawOutput::Inner => self.plot_inner(&candles, width, height, title),
+        match &self.options.output {
+            DrawOutput::Svg(path) => self.plot_svg(path, width, height, title),
+            DrawOutput::Png(path) => self.plot_png(path, width, height, title),
+            DrawOutput::Html(path) => self.plot_html(path, width, height, title),
+            DrawOutput::Inner => self.plot_inner(width, height, title),
         }
     }
 
     /// Saves the chart as an SVG file.
-    fn plot_svg(&self, path: &str, candles: &[&Candle], width: u32, height: u32, title: &str) -> Result<()> {
-        let backtest = self.backtest.ok_or(Error::Msg("No backtest provided".to_string()))?;
+    fn plot_svg(&self, path: &str, width: u32, height: u32, title: &str) -> Result<()> {
         let root = SVGBackend::new(path, (width, height)).into_drawing_area();
         root.fill(&WHITE).map_err(|e| Error::Plotters(e.to_string()))?;
-        self.draw_chart(&root, candles, backtest, title)
+        self.draw_chart(&root, title)
     }
 
     /// Saves the chart as a PNG file.
-    fn plot_png(&self, path: &str, candles: &[&Candle], width: u32, height: u32, title: &str) -> Result<()> {
-        let backtest = self.backtest.ok_or(Error::Msg("No backtest provided".to_string()))?;
+    fn plot_png(&self, path: &str, width: u32, height: u32, title: &str) -> Result<()> {
         let root = BitMapBackend::new(path, (width, height)).into_drawing_area();
         root.fill(&WHITE).map_err(|e| Error::Plotters(e.to_string()))?;
-        self.draw_chart(&root, candles, backtest, title)
+        self.draw_chart(&root, title)
     }
 
     /// Saves the chart as an HTML file (not implemented).
-    #[allow(unused_variables)]
-    fn plot_html(&self, path: &str, candles: &[&Candle], width: u32, height: u32, title: &str) -> Result<()> {
+    fn plot_html(&self, _path: &str, _width: u32, _height: u32, _title: &str) -> Result<()> {
         Err(Error::Msg("HTML output is not implemented".to_string()))
     }
 
     /// Displays the chart in the current console (not implemented).
-    #[allow(unused_variables)]
-    fn plot_inner(&self, candles: &[&Candle], width: u32, height: u32, title: &str) -> Result<()> {
+    fn plot_inner(&self, _width: u32, _height: u32, _title: &str) -> Result<()> {
         Err(Error::Msg("Inner display is not implemented".to_string()))
     }
 
     /// Draws the main chart with price, volume, and metrics.
-    fn draw_chart<DB: DrawingBackend>(
-        &self,
-        drawing_area: &DrawingArea<DB, Shift>,
-        candles: &[&Candle],
-        backtest: &Backtest,
-        title: &str,
-    ) -> Result<()> {
+    fn draw_chart<DB: DrawingBackend>(&self, drawing_area: &DrawingArea<DB, Shift>, title: &str) -> Result<()> {
         let total_height = drawing_area.dim_in_pixel().1 as f64;
-        let volume_height = if self.options.show_volume {
-            total_height * 0.2
-        } else {
-            0.0
-        };
+        let mut volume_height = 0.0;
+        if self.options.show_volume {
+            volume_height = total_height * 0.2;
+        }
 
-        #[cfg(not(feature = "metrics"))]
-        let metrics_height = 0.0;
+        let mut metrics_height = 0.0;
         #[cfg(feature = "metrics")]
-        let metrics_height = if self.options.show_metrics {
-            total_height * 0.2
-        } else {
-            0.0
-        };
+        if self.options.show_metrics {
+            metrics_height = total_height * 0.2;
+        }
 
         let price_height = total_height - volume_height - metrics_height;
 
-        #[cfg(not(feature = "metrics"))]
-        let rest_area = drawing_area;
+        let (mut metrics_area, mut rest_area) = (drawing_area.clone(), drawing_area.clone());
         #[cfg(feature = "metrics")]
-        let (metrics_area, rest_area) = if self.options.show_metrics {
-            drawing_area.split_vertically(metrics_height as u32)
-        } else {
-            (drawing_area.clone(), drawing_area.clone())
-        };
+        if self.options.show_metrics {
+            (metrics_area, rest_area) = drawing_area.split_vertically(metrics_height as u32)
+        }
 
         let (price_area, volume_area) = if self.options.show_volume {
             rest_area.split_vertically(price_height as u32)
@@ -197,35 +196,30 @@ impl<'d> Draw<'d> {
         };
 
         // draw all charts
-        self.draw_price_chart(&price_area, backtest, title)?;
+        self.draw_price_chart(&price_area, title)?;
         if self.options.show_volume {
-            self.draw_volume_chart(&volume_area, candles)?;
+            self.draw_volume_chart(&volume_area)?;
         }
         #[cfg(feature = "metrics")]
         if self.options.show_metrics {
-            self.draw_metrics_chart(&metrics_area, backtest)?;
+            self.draw_metrics_chart(&metrics_area)?;
         }
 
         drawing_area.present().map_err(|e| Error::Plotters(e.to_string()))
     }
 
     /// Draws the price chart (candlesticks).
-    fn draw_price_chart<DB: DrawingBackend>(
-        &self,
-        drawing_area: &DrawingArea<DB, Shift>,
-        backtest: &Backtest,
-        title: &str,
-    ) -> Result<()> {
-        let candles = backtest.candles().collect::<Vec<_>>();
-        let min_price = candles.iter().map(|c| c.low()).fold(f64::INFINITY, f64::min);
-        let max_price = candles.iter().map(|c| c.high()).fold(f64::NEG_INFINITY, f64::max);
-        let first_time = candles.first().ok_or(Error::CandleNotFound)?.open_time();
-        let last_time = candles.last().ok_or(Error::CandleNotFound)?.close_time();
+    fn draw_price_chart<DB: DrawingBackend>(&self, drawing_area: &DrawingArea<DB, Shift>, title: &str) -> Result<()> {
+        let min_price = self.candles.iter().map(|c| c.low()).fold(f64::INFINITY, f64::min);
+        let max_price = self.candles.iter().map(|c| c.high()).fold(f64::NEG_INFINITY, f64::max);
+        let first_time = self.candles.first().ok_or(Error::CandleNotFound)?.open_time();
+        let last_time = self.candles.last().ok_or(Error::CandleNotFound)?.close_time();
         let price_range = max_price - min_price;
         let price_padding = price_range * 0.1;
 
         #[cfg(feature = "metrics")]
-        let balances = backtest
+        let balances = self
+            .metrics
             .events()
             .filter_map(|evt| match evt {
                 Event::WalletUpdate { datetime, balance, .. } => Some((*datetime, *balance)),
@@ -276,35 +270,32 @@ impl<'d> Draw<'d> {
                 .map_err(|e| Error::Plotters(e.to_string()))?;
         }
 
-        let candle_count = candles.len();
+        let candle_count = self.candles.len();
         let x_labels = candle_count / 15;
 
-        {
-            let mut mesh = chart.configure_mesh();
-            mesh.y_desc("Price")
-                .y_label_style(("sans-serif", Y_LABEL_SIZE))
-                .y_labels(5);
+        let mut mesh = chart.configure_mesh();
+        mesh.y_desc("Price")
+            .y_label_style(("sans-serif", Y_LABEL_SIZE))
+            .y_labels(5);
 
-            if self.options.show_volume {
-                mesh.disable_x_axis();
-            } else {
-                mesh.x_desc("Time")
-                    .x_label_style(("sans-serif", X_LABEL_SIZE))
-                    .x_labels(x_labels);
-            }
-
-            mesh.draw().map_err(|e| Error::Plotters(e.to_string()))?;
+        if self.options.show_volume {
+            mesh.disable_x_axis();
+        } else {
+            mesh.x_desc("Time")
+                .x_label_style(("sans-serif", X_LABEL_SIZE))
+                .x_labels(x_labels);
         }
+
+        mesh.draw().map_err(|e| Error::Plotters(e.to_string()))?;
 
         let candle_width = {
             let total_width = drawing_area.dim_in_pixel().0 as f64;
             let available_width = total_width - (X_LABEL_SIZE * 2) as f64;
-            let candles_count = candles.len() as f64;
-            (available_width / candles_count).max(5.0) as u32
+            (available_width / candle_count as f64).max(5.0) as u32
         };
 
         chart
-            .draw_series(candles.iter().map(|c| {
+            .draw_series(self.candles.iter().map(|c| {
                 let x = c.open_time();
                 let open = c.open();
                 let high = c.high();
@@ -319,24 +310,38 @@ impl<'d> Draw<'d> {
         if self.options.show_metrics {
             use crate::PercentCalculus;
 
-            let initial_balance = backtest.initial_balance();
+            let initial_balance = self.metrics.initial_balance();
             let red_balances = balances.iter().filter(|(_, balance)| *balance < initial_balance);
             let blue_balances = balances.iter().filter(|(_, balance)| *balance >= initial_balance);
 
-            let opened_positions = backtest
+            let opened_positions = self
+                .metrics
                 .events()
                 .filter_map(|e| match e {
                     Event::AddPosition(date_time, position) => Some((date_time, position.entry_price())),
                     _ => None,
                 })
-                .map(|(datetime, price)| Circle::new((*datetime, price.expect("Invalid price").addpercent(5.0)), 2, BLUE.filled()));
-            let closed_positions = backtest
+                .map(|(datetime, price)| {
+                    Circle::new(
+                        (*datetime, price.expect("Invalid price").addpercent(5.0)),
+                        2,
+                        BLUE.filled(),
+                    )
+                });
+            let closed_positions = self
+                .metrics
                 .events()
                 .filter_map(|e| match e {
                     Event::DelPosition(date_time, position) => Some((date_time, position.entry_price())),
                     _ => None,
                 })
-                .map(|(datetime, price)| Circle::new((*datetime, price.expect("Invalid price").addpercent(5.0)), 2, RED.filled()));
+                .map(|(datetime, price)| {
+                    Circle::new(
+                        (*datetime, price.expect("Invalid price").addpercent(5.0)),
+                        2,
+                        RED.filled(),
+                    )
+                });
 
             chart
                 .draw_series(opened_positions)
@@ -364,15 +369,15 @@ impl<'d> Draw<'d> {
     }
 
     /// Draws the volume chart.
-    fn draw_volume_chart<DB: DrawingBackend>(
-        &self,
-        drawing_area: &DrawingArea<DB, Shift>,
-        candles: &[&Candle],
-    ) -> Result<()> {
-        let max_volume = candles.iter().map(|c| c.volume()).fold(f64::NEG_INFINITY, f64::max);
+    fn draw_volume_chart<DB: DrawingBackend>(&self, drawing_area: &DrawingArea<DB, Shift>) -> Result<()> {
+        let max_volume = self
+            .candles
+            .iter()
+            .map(|c| c.volume())
+            .fold(f64::NEG_INFINITY, f64::max);
         let volume_padding = max_volume * 0.1;
-        let first_time = candles.first().ok_or(Error::CandleNotFound)?.open_time();
-        let last_time = candles.last().ok_or(Error::CandleNotFound)?.close_time();
+        let first_time = self.candles.first().ok_or(Error::CandleNotFound)?.open_time();
+        let last_time = self.candles.last().ok_or(Error::CandleNotFound)?.close_time();
         let drawing_area = drawing_area.margin(0, 10, 70, 70);
 
         let mut chart = ChartBuilder::on(&drawing_area)
@@ -381,7 +386,7 @@ impl<'d> Draw<'d> {
             .build_cartesian_2d(first_time..last_time, 0.0..max_volume + volume_padding)
             .map_err(|e| Error::Plotters(e.to_string()))?;
 
-        let candle_count = candles.len();
+        let candle_count = self.candles.len();
         let x_labels = candle_count / 15;
 
         chart
@@ -395,7 +400,7 @@ impl<'d> Draw<'d> {
             .map_err(|e| Error::Plotters(e.to_string()))?;
 
         chart
-            .draw_series(candles.iter().map(|c| {
+            .draw_series(self.candles.iter().map(|c| {
                 let x = c.open_time();
                 let volume = c.volume();
                 let color = if c.ask() >= c.bid() {
@@ -411,16 +416,11 @@ impl<'d> Draw<'d> {
 
     /// Draws the metrics chart (if the "metrics" feature is enabled).
     #[cfg(feature = "metrics")]
-    fn draw_metrics_chart<DB: DrawingBackend>(
-        &self,
-        drawing_area: &DrawingArea<DB, Shift>,
-        backtest: &Backtest,
-    ) -> Result<()> {
-        let metrics = Metrics::from(backtest);
-        let max_drawdown = metrics.max_drawdown();
-        let profit_factor = metrics.profit_factor();
-        let sharpe_ratio = metrics.sharpe_ratio(0.0);
-        let win_rate = metrics.win_rate();
+    fn draw_metrics_chart<DB: DrawingBackend>(&self, drawing_area: &DrawingArea<DB, Shift>) -> Result<()> {
+        let max_drawdown = self.metrics.max_drawdown();
+        let profit_factor = self.metrics.profit_factor();
+        let sharpe_ratio = self.metrics.sharpe_ratio(0.0);
+        let win_rate = self.metrics.win_rate();
 
         let drawing_area = drawing_area.margin(30, 0, 70, 70);
         let mut metrics_chart = ChartBuilder::on(&drawing_area)

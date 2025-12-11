@@ -2,7 +2,6 @@
 //!
 //! This example implements a simplified version of the famous **Turtle Trading Strategy**
 //! developed by Richard Dennis, which uses trend-following techniques with strict risk management.
-
 mod utils;
 
 use std::sync::Arc;
@@ -71,11 +70,11 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     #[cfg(feature = "draws")]
     {
         let options = DrawOptions::default()
-            .draw_output(DrawOutput::Svg("../bts.svg"))
+            .draw_output(DrawOutput::Svg("bts.svg".to_owned()))
             .show_volume(true);
         #[cfg(feature = "metrics")]
         let options = options.show_metrics(true);
-        let draw = Draw::with_backtest(&bts).with_options(options);
+        let draw = Draw::from(&bts).with_options(options);
         draw.plot()?;
     }
 

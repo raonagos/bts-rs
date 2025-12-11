@@ -3,6 +3,8 @@
 //! This module provides tools to optimize trading strategies by testing different parameter combinations.
 //! The `Optimizer` struct handles the execution of backtests for each combination, while the
 //! `ParameterCombination` trait defines how to generate parameter sets.
+//! 
+//! It needs to enable `optimizer` feature to use it. Take a look at [parallelize parameters optimization](https://github.com/raonagos/bts-rs/blob/master/examples/par_parameters_optimization.rs) for example.
 
 use std::marker::PhantomData;
 use std::sync::{Arc, Mutex};
@@ -69,19 +71,21 @@ impl<PC: ParameterCombination> Optimizer<PC> {
         }
     }
 
-    /// Optimizes a trading strategy by testing all parameter combinations.
+    /// Optimizes a trading strategy by testing all parameter combinations and filtering the results.
     ///
     /// # Arguments
-    /// * `combinator` - Function that converts a parameter combination into strategy-specific parameters.
-    /// * `strategy` - Trading strategy function to test.
-    /// * `filter` - Function that takes a reference to its backtest instance and returns an `Option` of `R`.
+    /// * `combinator` - A function that converts a parameter combination into strategy-specific parameters.
+    /// * `strategy` - A trading strategy function to test.
+    /// * `filter` - A function that takes a reference to a `Backtest` instance after strategy execution and returns an `Option<R>`.
     ///
     /// # Returns
-    /// A vector of tuples containing each parameter combination and its resulting balance.
+    /// A vector of tuples where each tuple contains:
+    /// - The original parameter combination.
+    /// - The filtered result, as determined by the `filter` function.
     ///
     /// # Errors
     /// Returns an error if backtest execution fails.
-    pub fn with_filter<T, C, S, F, R>(&self, combinator: C, strategy: S, filter: F) -> Result<Vec<(PC::Output, R)>>
+    pub fn with_filter<T, R, C, S, F>(&self, combinator: C, strategy: S, filter: F) -> Result<Vec<(PC::Output, R)>>
     where
         T: Clone,
         R: Clone + Send,

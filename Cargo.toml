@@ -1,6 +1,6 @@
 [package]
 name = "bts-rs"
-version = "0.8.2"
+version = "0.9.0"
 edition = "2024"
 description = "Backtest your trading strategy."
 authors = ["tetuaoro <65575727+tetuaoro@users.noreply.github.com>"]
@@ -25,12 +25,11 @@ thiserror = "2.0.17"
 rayon = { version = "1.11.0", optional = true }
 plotters = { version = "0.3.7", optional = true }
 num_cpus = { version = "1.17.0", optional = true }
-serde = { version = "1.0.226", features = ["derive"], optional = true }
+serde = { version = "1.0.226", features = ["derive", "rc"], optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = "0.3.4"
 
-# also update the doc feature below
 [features]
 metrics = []
 draws = ["dep:plotters"]
@@ -46,22 +45,6 @@ features = ["metrics", "draws", "optimizer"]
 ta = "0.5.0"
 
 [[example]]
-name = "ts"
-path = "examples/trailing_stop.rs"
-
-[[example]]
-name = "tpsl"
-path = "examples/take_profit_and_stop_loss.rs"
-
-[[example]]
-name = "popt"
-path = "examples/parameter_optimization.rs"
-
-[[example]]
-name = "par_popt"
+name = "par_parameters_optimization"
 path = "examples/par_parameters_optimization.rs"
 required-features = ["optimizer"]
-
-[[example]]
-name = "aggts"
-path = "examples/agg_trailing_stop.rs"

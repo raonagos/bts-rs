@@ -1,5 +1,5 @@
-use bts_rs::engine::{Candle, CandleBuilder};
 use bts_rs::PercentCalculus;
+use bts_rs::engine::{Candle, CandleBuilder};
 #[cfg(feature = "metrics")]
 use bts_rs::metrics::Metrics;
 use chrono::{Duration, Utc};
@@ -50,6 +50,10 @@ pub fn example_candles() -> Vec<Candle> {
 pub fn print_metrics(metrics: &Metrics, initial_balance: f64) {
     println!("=== Backtest Metrics ===");
     println!("Initial Balance: {:.2}", initial_balance);
+    println!("Final Balance: {:.2}", metrics.balance());
+    println!("Profit & Loss (P&L): {:.2}", metrics.pnl());
+    println!("Fees paid: {:.2}", metrics.fees());
+    println!();
     println!("Max Drawdown: {:.2}%", metrics.max_drawdown());
     println!("Profit Factor: {:.2}", metrics.profit_factor());
     println!("Sharpe Ratio (risk-free rate = 2%): {:.2}", metrics.sharpe_ratio(0.02));

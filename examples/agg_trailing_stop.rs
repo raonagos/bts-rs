@@ -1,8 +1,3 @@
-//! # Turtle Trading Strategy with Trailing Stop and Multi-Timeframe Analysis
-//!
-//! This example implements a simplified version of the famous **Turtle Trading Strategy**
-//! developed by Richard Dennis, which uses trend-following techniques with strict risk management.
-
 mod utils;
 
 use std::sync::Arc;
@@ -22,6 +17,8 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
 
     impl Aggregation for TimeframeAggregator {
         fn factors(&self) -> &[usize] {
+            // return (1) the normal candle
+            // aggregate 4 & 8 candles
             &[1, 4, 8]
         }
     }
@@ -31,8 +28,12 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         let _candle_four = candles.get(1);
         let _candle_eight = candles.get(2);
 
-        if let Some(_c) = _candle_four {}
-        if let Some(_c) = _candle_eight {}
+        if let Some(_c) = _candle_four {
+            // first candle appears at the 5rd iteration
+        }
+        if let Some(_c) = _candle_eight {
+            // first candle appears at the 9rd iteration
+        }
 
         let close = candle_one.close();
         let output = ema.next(close);
@@ -86,9 +87,9 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     #[cfg(feature = "draws")]
     {
         let options = DrawOptions::default()
-            .draw_output(DrawOutput::Svg("../bts.svg"))
+            .draw_output(DrawOutput::Svg("bts.svg".to_owned()))
             .show_volume(true);
-        let draw = Draw::with_backtest(&bts).with_options(options);
+        let draw = Draw::from(&bts).with_options(options);
         draw.plot()?;
     }
 

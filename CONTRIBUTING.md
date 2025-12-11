@@ -27,7 +27,7 @@ Open an **issue** with:
 1. **Fork** and clone the repo:
 ```bash
 git clone https://github.com/raonagos/bts-rs.git
-cd bts
+cd bts-rs
 ```
 
 2. Create a branch:
@@ -38,7 +38,7 @@ git checkout -b my-feature
 
 3. Make changes and test:
 ```bash
-cargo test // or run build.sh
+cargo test --all-features
 ```
 
 4. Submit a Pull Request (PR) to main.

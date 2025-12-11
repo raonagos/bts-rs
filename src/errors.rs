@@ -6,7 +6,6 @@ use chrono::{DateTime, Utc};
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// Custom error types for the `bts` library.
-//#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     /// The candle data provided is empty.

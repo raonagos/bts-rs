@@ -10,6 +10,8 @@
 //!
 //! This module defines the `Event` enum, which represents actions and state changes
 //! during a backtest, such as order execution, position updates, and wallet changes.
+//! 
+//! It needs to enable `metrics` feature to use it. Take a look at [trailing stop](https://github.com/raonagos/bts-rs/blob/master/examples/trailing_stop.rs#L62) for example.
 
 use std::fmt;
 
@@ -86,6 +88,9 @@ impl From<(DateTime<Utc>, &Wallet)> for Event {
 /// It is typically constructed from a `Backtest` or a list of `Event`s.
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Metrics {
+    pnl: f64,
+    fees: f64,
+    balance: f64,
     events: Vec<Event>,
     initial_balance: f64,
 }
@@ -93,6 +98,9 @@ pub struct Metrics {
 impl From<&Backtest> for Metrics {
     fn from(value: &Backtest) -> Self {
         Self {
+            fees: value.fees_paid(),
+            balance: value.balance(),
+            pnl: value.unrealized_pnl(),
             initial_balance: value.initial_balance(),
             events: value.events().cloned().collect(),
         }
@@ -100,12 +108,40 @@ impl From<&Backtest> for Metrics {
 }
 
 impl Metrics {
-    /// Creates a new `Metrics` instance from a list of events and an initial balance.
-    pub fn new(events: Vec<Event>, initial_balance: f64) -> Self {
+    /// Creates a new `Metrics` instance from a list of events, an initial balance, a cumulative pnl and a cumulative fees paid.
+    pub fn new(events: Vec<Event>, initial_balance: f64, balance: f64, pnl: f64, fees: f64) -> Self {
         Self {
+            pnl,
+            fees,
             events,
+            balance,
             initial_balance,
         }
+    }
+
+    /// Returns the initial balance.
+    pub fn initial_balance(&self) -> f64 {
+        self.initial_balance
+    }
+
+    /// Returns the events.
+    pub fn events(&self) -> std::slice::Iter<'_, Event> {
+        self.events.iter()
+    }
+
+    /// Returns the balance.
+    pub fn balance(&self) -> f64 {
+        self.balance
+    }
+
+    /// Returns the cumulative fees paid.
+    pub fn fees(&self) -> f64 {
+        self.fees
+    }
+
+    /// Returns the profits and losses.
+    pub fn pnl(&self) -> f64 {
+        self.pnl
     }
 
     /// Computes the maximum drawdown as a percentage.
@@ -205,11 +241,15 @@ impl fmt::Display for Metrics {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "=== Backtest Metrics ===")?;
         writeln!(f, "Initial Balance: {:.2}", self.initial_balance)?;
+        writeln!(f, "Final Balance: {:.2}", self.balance)?;
+        writeln!(f, "Profit & Loss (P&L): {:.2}", self.pnl)?;
+        writeln!(f, "Fees paid: {:.2}", self.fees)?;
+        #[allow(clippy::writeln_empty_string)]
+        writeln!(f, "")?;
         writeln!(f, "Max Drawdown: {:.2}%", self.max_drawdown())?;
         writeln!(f, "Profit Factor: {:.2}", self.profit_factor())?;
         writeln!(f, "Sharpe Ratio (risk-free rate = 0.0): {:.2}", self.sharpe_ratio(0.0))?;
-        writeln!(f, "Win Rate: {:.2}%", self.win_rate())?;
-        Ok(())
+        writeln!(f, "Win Rate: {:.2}%", self.win_rate())
     }
 }
 
@@ -262,14 +302,14 @@ fn max_drawdown() {
             balance: 11000.0,
         },
     ];
-    let metrics = Metrics::new(events, 10000.0);
+    let metrics = Metrics::new(events, 10000.0, 0.0, 0.0, 0.0);
     assert_eq!(metrics.max_drawdown(), 25.0); // (12000 - 9000) / 12000 = 25%
 }
 
 #[cfg(test)]
 #[test]
 fn max_drawdown_no_events() {
-    let metrics = Metrics::new(vec![], 10000.0);
+    let metrics = Metrics::new(vec![], 10000.0, 0.0, 0.0, 0.0);
     assert_eq!(metrics.max_drawdown(), 0.0); // No drawdown if no events
 }
 
@@ -282,7 +322,7 @@ fn profit_factor() {
         Event::DelPosition(DateTime::default(), winning_position),
         Event::DelPosition(DateTime::default(), losing_position),
     ];
-    let metrics = Metrics::new(events, 10000.0);
+    let metrics = Metrics::new(events, 10000.0, 0.0, 0.0, 0.0);
     assert_eq!(metrics.profit_factor(), 2.0); // 20 / 10 = 2.0
 }
 
@@ -291,14 +331,14 @@ fn profit_factor() {
 fn profit_factor_no_losses() {
     let winning_position = create_position(20.0);
     let events = vec![Event::DelPosition(DateTime::default(), winning_position)];
-    let metrics = Metrics::new(events, 10000.0);
+    let metrics = Metrics::new(events, 10000.0, 0.0, 0.0, 0.0);
     assert_eq!(metrics.profit_factor(), f64::INFINITY); // No losses
 }
 
 #[cfg(test)]
 #[test]
 fn profit_factor_no_trades() {
-    let metrics = Metrics::new(vec![], 10000.0);
+    let metrics = Metrics::new(vec![], 10000.0, 0.0, 0.0, 0.0);
     assert_eq!(metrics.profit_factor(), f64::INFINITY); // No trades
 }
 
@@ -340,7 +380,7 @@ fn sharpe_ratio() {
             balance: 10700.0,
         },
     ];
-    let metrics = Metrics::new(events, 10000.0);
+    let metrics = Metrics::new(events, 10000.0, 0.0, 0.0, 0.0);
     let sharpe = metrics.sharpe_ratio(0.0);
     // Approximate value, since Sharpe ratio depends on standard deviation
     assert!(sharpe > 0.0 && sharpe < 1.0);
@@ -349,7 +389,7 @@ fn sharpe_ratio() {
 #[cfg(test)]
 #[test]
 fn sharpe_ratio_no_events() {
-    let metrics = Metrics::new(vec![], 10000.0);
+    let metrics = Metrics::new(vec![], 10000.0, 0.0, 0.0, 0.0);
     // Sharpe ratio is undefined (division by zero), but in practice, it will return NaN
     assert!(metrics.sharpe_ratio(0.0).is_nan());
 }
@@ -363,14 +403,14 @@ fn win_rate() {
         Event::DelPosition(DateTime::default(), winning_position),
         Event::DelPosition(DateTime::default(), losing_position),
     ];
-    let metrics = Metrics::new(events, 10000.0);
+    let metrics = Metrics::new(events, 10000.0, 0.0, 0.0, 0.0);
     assert_eq!(metrics.win_rate(), 50.0); // 1 win out of 2 trades
 }
 
 #[cfg(test)]
 #[test]
 fn win_rate_no_trades() {
-    let metrics = Metrics::new(vec![], 10000.0);
+    let metrics = Metrics::new(vec![], 10000.0, 0.0, 0.0, 0.0);
     assert_eq!(metrics.win_rate(), 0.0); // No trades
 }
 
@@ -379,6 +419,6 @@ fn win_rate_no_trades() {
 fn win_rate_all_winning() {
     let winning_position = create_position(20.0);
     let events = vec![Event::DelPosition(DateTime::default(), winning_position)];
-    let metrics = Metrics::new(events, 10000.0);
+    let metrics = Metrics::new(events, 10000.0, 0.0, 0.0, 0.0);
     assert_eq!(metrics.win_rate(), 100.0); // 1 win out of 1 trade
 }

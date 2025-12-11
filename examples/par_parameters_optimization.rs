@@ -1,8 +1,7 @@
 //! # Parallel EMA and MACD Parameters Optimization
 //!
-//! This module implements a **parallel brute-force optimization** to find optimal
+//! This module implements a **parallel opt** to find optimal
 //! EMA and MACD parameters for trading strategies using multi-threading.
-
 mod utils;
 
 use std::sync::Arc;

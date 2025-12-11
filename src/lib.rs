@@ -47,7 +47,7 @@
 //!
 //! ### 4. **Optimization Tools**
 //!
-//! - **Parallel Brute-Force**: Optimize strategy parameters (e.g., EMA periods) using multi-threading.
+//! - **Parallelize**: Optimize strategy parameters (e.g., EMA periods) using multi-threading.
 //!
 //! ## Getting Started
 //!
@@ -107,6 +107,9 @@
 //! === Backtest Metrics ===
 //! Initial Balance: 10000.00
 //! Final Balance: 10018.00
+//! Profit & Loss (P&L): 0.00
+//! Fees paid: 0.00
+//! 
 //! Max Drawdown: 0.20%
 //! Profit Factor: 2.00
 //! Sharpe Ratio: 1.50
