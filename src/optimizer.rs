@@ -7,10 +7,10 @@
 //! It needs to enable `optimizer` feature to use it. Take a look at [parallelize parameters optimization](https://github.com/raonagos/bts-rs/blob/master/examples/par_parameters_optimization.rs) for example.
 
 use std::marker::PhantomData;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use crate::engine::{Backtest, Candle};
-use crate::errors::{Error, Result};
+use crate::errors::Result;
 
 use rayon::prelude::*;
 
@@ -20,13 +20,13 @@ use rayon::prelude::*;
 /// The associated type `P` represents a single parameter combination (e.g., a tuple of values).
 pub trait ParameterCombination: Sync {
     /// Type representing a single parameter combination (e.g., `(usize, f64)`).
-    type Output: Clone + Send + Sync;
+    type Item: Clone + Send + Sync;
 
     /// Generates all possible parameter combinations to test.
     ///
     /// # Returns
     /// A vector containing all parameter combinations.
-    fn generate() -> Vec<Self::Output>;
+    fn generate() -> Vec<Self::Item>;
 }
 
 /// Optimizer for testing trading strategies with different parameter combinations.
@@ -73,6 +73,9 @@ impl<PC: ParameterCombination> Optimizer<PC> {
 
     /// Optimizes a trading strategy by testing all parameter combinations and filtering the results.
     ///
+    /// This function leverages multi-threading to evaluate multiple parameter combinations
+    /// simultaneously, significantly improving performance by utilizing all available CPU cores.
+    ///
     /// # Arguments
     /// * `combinator` - A function that converts a parameter combination into strategy-specific parameters.
     /// * `strategy` - A trading strategy function to test.
@@ -85,24 +88,16 @@ impl<PC: ParameterCombination> Optimizer<PC> {
     ///
     /// # Errors
     /// Returns an error if backtest execution fails.
-    ///
-    /// # Performance Note
-    /// This function uses `Mutex` to ensure thread safety when modifying shared state.
-    /// In some cases, this may result in slower performance compared to a sequential `for` loop,
-    /// especially if the `strategy` function is called frequently or if contention on the `Mutex` is high.
-    ///
-    /// For stateless strategies, consider using an alternative approach without it for better performance.
-    pub fn with_filter<T, R, C, S, F>(&self, combinator: C, strategy: S, filter: F) -> Result<Vec<(PC::Output, R)>>
+    pub fn with_filter<T, R, C, S, F>(&self, combinator: C, strategy: S, filter: F) -> Result<Vec<(PC::Item, R)>>
     where
         T: Clone,
         R: Clone + Send,
-        C: Fn(&PC::Output) -> Result<T> + Sync,
-        S: FnMut(&mut Backtest, &mut T, &Candle) -> Result<()> + Send,
+        C: Fn(&PC::Item) -> Result<T> + Sync,
+        S: FnMut(&mut Backtest, &mut T, &Candle) -> Result<()> + Clone + Send + Sync,
         F: Fn(&Backtest) -> Option<R> + Send + Sync,
     {
         let num_cpus = num_cpus::get();
         let combinations = PC::generate();
-        let strategy = Arc::new(Mutex::new(strategy));
         let filter = Arc::new(filter);
         let chunk_size = combinations.len().div_ceil(num_cpus).max(1);
 
@@ -113,14 +108,12 @@ impl<PC: ParameterCombination> Optimizer<PC> {
                 let mut backtest = Backtest::new(candles, self.initial_balance, self.market_fees)?;
                 let mut local_results = Vec::with_capacity(par_combinations.len());
 
-                let strategy_arc = Arc::clone(&strategy);
-                let mut strategy_guard = strategy_arc.lock().map_err(|e| Error::Mutex(e.to_string()))?;
-
+                let mut strategy = strategy.clone();
                 let filter_arc = Arc::clone(&filter);
 
                 for param_set in par_combinations {
                     let mut output = combinator(param_set)?;
-                    backtest.run(|bt, candle| strategy_guard(bt, &mut output, candle))?;
+                    backtest.run(|bt, candle| strategy(bt, &mut output, candle))?;
                     let result = filter_arc(&backtest);
                     if let Some(r) = result {
                         local_results.push((param_set.clone(), r));
@@ -145,18 +138,11 @@ impl<PC: ParameterCombination> Optimizer<PC> {
     ///
     /// # Errors
     /// Returns an error if backtest execution fails.
-    ///
-    /// # Performance Note
-    /// This function uses `Mutex` to ensure thread safety when modifying shared state.
-    /// In some cases, this may result in slower performance compared to a sequential `for` loop,
-    /// especially if the `strategy` function is called frequently or if contention on the `Mutex` is high.
-    ///
-    /// For stateless strategies, consider using an alternative approach without it for better performance.
-    pub fn with<T, C, S>(&self, combinator: C, strategy: S) -> Result<Vec<(PC::Output, Backtest)>>
+    pub fn with<T, C, S>(&self, combinator: C, strategy: S) -> Result<Vec<(PC::Item, Backtest)>>
     where
         T: Clone,
-        C: Fn(&PC::Output) -> Result<T> + Sync,
-        S: FnMut(&mut Backtest, &mut T, &Candle) -> Result<()> + Send,
+        C: Fn(&PC::Item) -> Result<T> + Sync,
+        S: FnMut(&mut Backtest, &mut T, &Candle) -> Result<()> + Clone + Send + Sync,
     {
         self.with_filter(combinator, strategy, |backtest| Some(backtest.clone()))
     }
@@ -168,9 +154,9 @@ struct Parameters;
 
 #[cfg(test)]
 impl ParameterCombination for Parameters {
-    type Output = (usize, usize, usize, usize);
+    type Item = (usize, usize, usize, usize);
 
-    fn generate() -> Vec<Self::Output> {
+    fn generate() -> Vec<Self::Item> {
         let min = 8;
         let max = 13;
         (min..=max)
@@ -225,7 +211,9 @@ fn get_data() -> Vec<Candle> {
 #[cfg(test)]
 #[test]
 fn optimizer_with_ema_macd() {
+    use crate::errors::Error;
     use crate::prelude::*;
+
     use ta::indicators::{
         ExponentialMovingAverage, MovingAverageConvergenceDivergence, MovingAverageConvergenceDivergenceOutput,
     };
