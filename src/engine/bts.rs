@@ -93,8 +93,8 @@ impl Backtest {
     /// ### Arguments
     /// * `data` - Vector of candle data.
     /// * `initial_balance` - Initial wallet balance.
-    /// * `market_fee` - Market *(market and limit)* fee percentage (e.g., 0.1 for 0.1%).
-    ///   Fees are **only applied when positions are opened**, not when orders are placed.
+    /// * `market_fee` - Market *(market and limit)* fee percentage (e.g., 3 for 3%).
+    ///   Fees are **only applied when positions are opened or closed**, not when orders are placed.
     ///
     /// ### Market Fees Behavior
     /// - **Order Placement**: No fees are charged when placing an order.
@@ -115,6 +115,8 @@ impl Backtest {
         {
             return Err(Error::NegZeroFees);
         }
+
+        let market_fees = market_fees.map(|(mf, lf)| (mf / 100.0, lf / 100.0));
 
         Ok(Self {
             data,
@@ -688,23 +690,23 @@ mod tests {
         {
             let data = get_long_data();
             let balance = 1000.0;
-            let market_fee = 0.1; // 0.1%
-            let mut bt = Backtest::new(data, balance, Some((market_fee, 0.01))).unwrap();
+            let market_fee = 1.0; // 1%
+            let mut bt = Backtest::new(data, balance, Some((market_fee, 1.0))).unwrap();
 
             let candle = bt.next().unwrap();
             let price = candle.close(); // 100
             let take_profit = OrderType::TakeProfitAndStopLoss(price.addpercent(20.0), 0.0);
             let order = Order::from((OrderType::Market(price), take_profit, 1.0, OrderSide::Buy));
 
-            let open_fee = price * 1.0 * market_fee;
-            let expected_total_cost = price + open_fee; // 100 + 0.10% = 110.0
+            let open_fee = price * 1.0 * (market_fee / 100.0);
+            let expected_total_cost = price + open_fee; // 100 + 1.0% = 101.0
 
             bt.place_order(&candle, order).unwrap();
             bt.execute_orders(&candle).unwrap();
 
             assert!(!bt.positions.is_empty());
-            assert_eq!(bt.balance(), 890.0);
-            assert_eq!(bt.total_balance(), 890.0);
+            assert_eq!(bt.balance(), 899.0);
+            assert_eq!(bt.total_balance(), 899.0);
             assert_eq!(bt.free_balance().unwrap(), 1000.0 - expected_total_cost);
 
             let candle = bt.next().unwrap();
@@ -715,9 +717,9 @@ mod tests {
             bt.execute_positions(&candle).unwrap(); // close = 120, take profit
 
             assert!(bt.positions.is_empty());
-            assert_eq!(bt.balance(), 1000.0); // balance = 1020 - (10 * 2) (fees)
-            assert_eq!(bt.total_balance(), 1000.0);
-            assert_eq!(bt.free_balance().unwrap(), 1000.0);
+            assert_eq!(bt.balance(), 1018.0); // balance = 1020 - (1 * 2) (fees)
+            assert_eq!(bt.total_balance(), 1018.0);
+            assert_eq!(bt.free_balance().unwrap(), 1018.0);
         }
     }
 
@@ -725,23 +727,23 @@ mod tests {
     fn scenario_open_position_with_market_fees() {
         let data = get_long_data();
         let balance = 1000.0;
-        let market_fee = 0.1; // 0.1%
-        let mut bt = Backtest::new(data, balance, Some((market_fee, 0.01))).unwrap();
+        let market_fee = 1.0; // 1%
+        let mut bt = Backtest::new(data, balance, Some((market_fee, 1.0))).unwrap();
 
         let candle = bt.next().unwrap();
         let price = candle.close(); // 100
         let take_profit = OrderType::TakeProfitAndStopLoss(price.addpercent(20.0), 0.0);
         let order = Order::from((OrderType::Market(price), take_profit, 1.0, OrderSide::Buy));
 
-        let open_fee = price * 1.0 * market_fee;
-        let expected_total_cost = price + open_fee; // 100 + 0.10% = 110.0
+        let open_fee = price * 1.0 * (market_fee / 100.0);
+        let expected_total_cost = price + open_fee; // 100 + 1.0% = 101.0
 
         bt.place_order(&candle, order).unwrap();
         bt.execute_orders(&candle).unwrap();
 
         assert!(!bt.positions.is_empty());
-        assert_eq!(bt.balance(), 890.0);
-        assert_eq!(bt.total_balance(), 890.0);
+        assert_eq!(bt.balance(), 899.0);
+        assert_eq!(bt.total_balance(), 899.0);
         assert_eq!(bt.free_balance().unwrap(), 1000.0 - expected_total_cost);
 
         let candle = bt.next().unwrap();
@@ -752,9 +754,9 @@ mod tests {
         bt.execute_positions(&candle).unwrap(); // close = 120, take profit
 
         assert!(bt.positions.is_empty());
-        assert_eq!(bt.balance(), 1000.0); // balance = 1020 - (10 * 2) (fees)
-        assert_eq!(bt.total_balance(), 1000.0);
-        assert_eq!(bt.free_balance().unwrap(), 1000.0);
+        assert_eq!(bt.balance(), 1018.0); // balance = 1020 - (1 * 2) (fees)
+        assert_eq!(bt.total_balance(), 1018.0);
+        assert_eq!(bt.free_balance().unwrap(), 1018.0);
     }
 
     #[test]
