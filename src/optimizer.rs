@@ -90,31 +90,28 @@ impl<PC: ParameterCombination> Optimizer<PC> {
     /// Returns an error if backtest execution fails.
     pub fn with_filter<T, R, C, S, F>(&self, combinator: C, strategy: S, filter: F) -> Result<Vec<(PC::Item, R)>>
     where
-        T: Clone,
-        R: Clone + Send,
+        R: Send,
         C: Fn(&PC::Item) -> Result<T> + Sync,
-        S: FnMut(&mut Backtest, &mut T, &Candle) -> Result<()> + Clone + Send + Sync,
-        F: Fn(&Backtest) -> Option<R> + Send + Sync,
+        S: FnMut(&mut Backtest, &mut T, &Candle) -> Result<()> + Clone + Sync,
+        F: Fn(&Backtest) -> Option<R> + Sync,
     {
         let num_cpus = num_cpus::get();
         let combinations = PC::generate();
-        let filter = Arc::new(filter);
         let chunk_size = combinations.len().div_ceil(num_cpus).max(1);
 
         combinations
             .par_chunks(chunk_size)
             .map::<_, Result<_>>(|par_combinations| {
                 let candles = Arc::clone(&self.data);
-                let mut backtest = Backtest::new(candles, self.initial_balance, self.market_fees)?;
-                let mut local_results = Vec::with_capacity(par_combinations.len());
 
                 let mut strategy = strategy.clone();
-                let filter_arc = Arc::clone(&filter);
+                let mut backtest = Backtest::new(candles, self.initial_balance, self.market_fees)?;
+                let mut local_results = Vec::with_capacity(par_combinations.len());
 
                 for param_set in par_combinations {
                     let mut output = combinator(param_set)?;
                     backtest.run(|bt, candle| strategy(bt, &mut output, candle))?;
-                    let result = filter_arc(&backtest);
+                    let result = filter(&backtest);
                     if let Some(r) = result {
                         local_results.push((param_set.clone(), r));
                     }
@@ -140,9 +137,8 @@ impl<PC: ParameterCombination> Optimizer<PC> {
     /// Returns an error if backtest execution fails.
     pub fn with<T, C, S>(&self, combinator: C, strategy: S) -> Result<Vec<(PC::Item, Backtest)>>
     where
-        T: Clone,
         C: Fn(&PC::Item) -> Result<T> + Sync,
-        S: FnMut(&mut Backtest, &mut T, &Candle) -> Result<()> + Clone + Send + Sync,
+        S: FnMut(&mut Backtest, &mut T, &Candle) -> Result<()> + Clone + Sync,
     {
         self.with_filter(combinator, strategy, |backtest| Some(backtest.clone()))
     }
