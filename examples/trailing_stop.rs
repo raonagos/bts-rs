@@ -70,6 +70,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     #[cfg(feature = "draws")]
     {
         let options = DrawOptions::default()
+            // .draw_output(DrawOutput::Html("bts.html".to_owned()))
             .draw_output(DrawOutput::Svg("bts.svg".to_owned()))
             .show_volume(true);
         #[cfg(feature = "metrics")]

@@ -17,6 +17,8 @@ jobs:
 
     - name: Simple check
       run: cargo check --verbose
+    - name: Apt update
+      run: sudo apt update
     - name: Install font for draws feature
       run: sudo apt install -y libfontconfig1-dev
     - name: Check features

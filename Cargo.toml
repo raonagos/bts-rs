@@ -1,6 +1,6 @@
 [package]
 name = "bts-rs"
-version = "0.9.3"
+version = "0.9.4"
 edition = "2024"
 description = "Backtest your trading strategy."
 authors = ["tetuaoro <65575727+tetuaoro@users.noreply.github.com>"]
@@ -23,6 +23,7 @@ chrono = "0.4.42"
 thiserror = "2.0.17"
 
 rayon = { version = "1.11.0", optional = true }
+charming = { version = "0.6.0", optional = true }
 plotters = { version = "0.3.7", optional = true }
 num_cpus = { version = "1.17.0", optional = true }
 serde = { version = "1.0.226", features = ["derive", "rc"], optional = true }
@@ -32,7 +33,7 @@ getrandom = "0.3.4"
 
 [features]
 metrics = []
-draws = ["dep:plotters"]
+draws = ["dep:plotters", "dep:charming"]
 optimizer = ["dep:rayon", "dep:num_cpus"]
 
 serde = ["chrono/serde", "dep:serde"]

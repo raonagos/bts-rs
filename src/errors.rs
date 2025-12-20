@@ -114,21 +114,6 @@ pub enum Error {
     #[error("Try another order type")]
     MismatchedOrderType,
 
-    /// An I/O error occurred.
-    ///
-    /// ### Arguments
-    /// * `0` - The underlying I/O error.
-    #[error("{0}")]
-    Io(#[from] std::io::Error),
-
-    /// A formatter error occured.
-    ///
-    /// ### Arguments
-    /// * `0` - The underlying formatter error.
-    #[cfg(feature = "draws")]
-    #[error("{0}")]
-    Fmt(#[from] std::fmt::Error),
-
     /// An error with plotters crate.
     ///
     /// ### Arguments
@@ -137,9 +122,13 @@ pub enum Error {
     #[error("{0}")]
     Plotters(String),
 
-    /// A mutex was poisoned.
+    /// An error with charming crate.
+    ///
+    /// ### Arguments
+    /// * `0` - The underlying charming error.
+    #[cfg(feature = "draws")]
     #[error("{0}")]
-    Mutex(String),
+    Charming(#[from] charming::EchartsError),
 }
 
 #[cfg(feature = "serde")]
@@ -158,8 +147,104 @@ impl<'de> serde::Deserialize<'de> for Error {
     where
         D: serde::Deserializer<'de>,
     {
-        let s = String::deserialize(deserializer)?;
-        //todo implements others fields
-        Ok(Error::Msg(s))
+        // Error proxy
+        #[derive(serde::Deserialize)]
+        #[serde(tag = "type", content = "data")]
+        enum ErrorWrapper {
+            CandleDataEmpty,
+            CandleNotFound,
+            InvalidFactor,
+            MissingField {
+                field: String,
+            },
+            InvalidPriceOrder {
+                open: f64,
+                low: f64,
+                high: f64,
+                close: f64,
+            },
+            NegativeVolume {
+                volume: f64,
+            },
+            InvalideTimes {
+                open: i64,
+                close: i64,
+            },
+            NegZeroBalance {
+                balance: f64,
+            },
+            InsufficientFunds {
+                required: f64,
+                available: f64,
+            },
+            NegFreeBalance {
+                balance: f64,
+                locked: f64,
+            },
+            NegZeroFees,
+            UnlockBalance {
+                locked: f64,
+                amount: f64,
+            },
+            OrderNotFound,
+            RemoveOrder,
+            PositionNotFound,
+            RemovePosition,
+            ExitPrice {
+                price: f64,
+            },
+            Msg {
+                message: String,
+            },
+            NegTakeProfitAndStopLoss,
+            NegZeroTrailingStop,
+            MismatchedOrderType,
+            #[cfg(feature = "draws")]
+            Plotters {
+                error: String,
+            },
+            #[cfg(feature = "draws")]
+            Charming {
+                error: String,
+            },
+        }
+
+        // Désérialiser en utilisant la structure intermédiaire
+        let wrapper = ErrorWrapper::deserialize(deserializer)?;
+
+        // Convertir en Error
+        Ok(match wrapper {
+            ErrorWrapper::CandleDataEmpty => Error::CandleDataEmpty,
+            ErrorWrapper::CandleNotFound => Error::CandleNotFound,
+            ErrorWrapper::InvalidFactor => Error::InvalidFactor,
+            ErrorWrapper::MissingField { field } => Error::MissingField(Box::leak(field.into_boxed_str())),
+            ErrorWrapper::InvalidPriceOrder { open, low, high, close } => {
+                Error::InvalidPriceOrder(open, low, high, close)
+            }
+            ErrorWrapper::NegativeVolume { volume } => Error::NegativeVolume(volume),
+            ErrorWrapper::InvalideTimes { open, close } => {
+                let open_dt = DateTime::from_timestamp_millis(open).unwrap_or(Utc::now());
+                let close_dt = DateTime::from_timestamp_millis(close).unwrap_or(Utc::now());
+                Error::InvalideTimes(open_dt, close_dt)
+            }
+            ErrorWrapper::NegZeroBalance { balance } => Error::NegZeroBalance(balance),
+            ErrorWrapper::InsufficientFunds { required, available } => Error::InsufficientFunds(required, available),
+            ErrorWrapper::NegFreeBalance { balance, locked } => Error::NegFreeBalance(balance, locked),
+            ErrorWrapper::NegZeroFees => Error::NegZeroFees,
+            ErrorWrapper::UnlockBalance { locked, amount } => Error::UnlockBalance(locked, amount),
+            ErrorWrapper::OrderNotFound => Error::OrderNotFound,
+            ErrorWrapper::RemoveOrder => Error::RemoveOrder,
+            ErrorWrapper::PositionNotFound => Error::PositionNotFound,
+            ErrorWrapper::RemovePosition => Error::RemovePosition,
+            ErrorWrapper::ExitPrice { price } => Error::ExitPrice(price),
+            ErrorWrapper::Msg { message } => Error::Msg(message),
+            ErrorWrapper::NegTakeProfitAndStopLoss => Error::NegTakeProfitAndStopLoss,
+            ErrorWrapper::NegZeroTrailingStop => Error::NegZeroTrailingStop,
+            ErrorWrapper::MismatchedOrderType => Error::MismatchedOrderType,
+            #[cfg(feature = "draws")]
+            ErrorWrapper::Plotters { error } => Error::Plotters(error),
+            #[cfg(feature = "draws")]
+            ErrorWrapper::Charming { error } => Error::Charming(charming::EchartsError::HtmlRenderingError(error)),
+        })
     }
 }

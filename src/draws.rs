@@ -1,22 +1,26 @@
 //! Module for visualizing backtest results and candle charts.
 //!
 //! It needs to enable `draws` feature to use it. Take a look at [trailing stop](https://github.com/raonagos/bts-rs/blob/master/examples/trailing_stop.rs#L70) for example.
-#![allow(unused_variables)]
-#![allow(unused_mut)]
 
 use crate::engine::{Backtest, Candle};
 use crate::errors::{Error, Result};
 #[cfg(feature = "metrics")]
 use crate::metrics::{Event, Metrics};
 
+use charming::component::{Axis, DataZoom, DataZoomType, Grid, Title};
+use charming::element::{AxisLabel, Tooltip, Trigger};
+use charming::series::{Bar, Candlestick};
+use charming::{Chart, HtmlRenderer};
 use chrono::Duration;
 use plotters::backend::{BitMapBackend, DrawingBackend, SVGBackend};
 use plotters::coord::Shift;
 use plotters::prelude::*;
 use plotters::style::WHITE;
 
-/// Aspect ratio for the generated charts.
-const ASPECT_RATIO: f64 = 0.5625;
+/// Size of the X-axis.
+const WIDTH: u32 = 1280;
+/// Size of the Y-axis.
+const HEIGHT: u32 = 900;
 /// Size of the X-axis labels.
 const X_LABEL_SIZE: i32 = 20;
 /// Size of the Y-axis labels.
@@ -123,60 +127,50 @@ impl Draw {
             return Err(Error::CandleDataEmpty);
         }
 
-        let title = self.options.title.as_deref().unwrap_or("BTS Chart");
-        let mut height_factor = 1.0;
-        if self.options.show_volume {
-            height_factor += 0.4;
-        }
-        #[cfg(feature = "metrics")]
-        if self.options.show_metrics {
-            height_factor += 0.4;
-        }
-
-        let candle_count = candles.len() as u32;
-        let width = 1280.max(10 * candle_count);
-        let height = ((width as f64 * ASPECT_RATIO * height_factor) as u32).min(900);
-
         match &self.options.output {
-            DrawOutput::Svg(path) => self.plot_svg(path, width, height, title),
-            DrawOutput::Png(path) => self.plot_png(path, width, height, title),
-            DrawOutput::Html(path) => self.plot_html(path, width, height, title),
-            DrawOutput::Inner => self.plot_inner(width, height, title),
+            DrawOutput::Svg(path) => self.plot_svg(path),
+            DrawOutput::Png(path) => self.plot_png(path),
+            DrawOutput::Html(path) => self.plot_html(path),
+            DrawOutput::Inner => self.plot_inner(),
         }
     }
 
     /// Saves the chart as an SVG file.
-    fn plot_svg(&self, path: &str, width: u32, height: u32, title: &str) -> Result<()> {
-        let root = SVGBackend::new(path, (width, height)).into_drawing_area();
+    fn plot_svg(&self, path: &str) -> Result<()> {
+        let root = SVGBackend::new(path, (WIDTH, HEIGHT)).into_drawing_area();
         root.fill(&WHITE).map_err(|e| Error::Plotters(e.to_string()))?;
-        self.draw_chart(&root, title)
+        self.draw_chart(&root)
     }
 
     /// Saves the chart as a PNG file.
-    fn plot_png(&self, path: &str, width: u32, height: u32, title: &str) -> Result<()> {
-        let root = BitMapBackend::new(path, (width, height)).into_drawing_area();
+    fn plot_png(&self, path: &str) -> Result<()> {
+        let root = BitMapBackend::new(path, (WIDTH, HEIGHT)).into_drawing_area();
         root.fill(&WHITE).map_err(|e| Error::Plotters(e.to_string()))?;
-        self.draw_chart(&root, title)
+        self.draw_chart(&root)
     }
 
-    /// Saves the chart as an HTML file (not implemented).
-    fn plot_html(&self, _path: &str, _width: u32, _height: u32, _title: &str) -> Result<()> {
-        Err(Error::Msg("HTML output is not implemented".to_string()))
+    /// Saves the chart as an HTML file.
+    fn plot_html(&self, path: &str) -> Result<()> {
+        let chart = self.with_html_chart();
+        let mut renderer = HtmlRenderer::new("BTS Chart", WIDTH.into(), HEIGHT.into());
+        renderer.save(&chart, path)?;
+        Ok(())
     }
 
     /// Displays the chart in the current console (not implemented).
-    fn plot_inner(&self, _width: u32, _height: u32, _title: &str) -> Result<()> {
+    fn plot_inner(&self) -> Result<()> {
         Err(Error::Msg("Inner display is not implemented".to_string()))
     }
 
     /// Draws the main chart with price, volume, and metrics.
-    fn draw_chart<DB: DrawingBackend>(&self, drawing_area: &DrawingArea<DB, Shift>, title: &str) -> Result<()> {
+    fn draw_chart<DB: DrawingBackend>(&self, drawing_area: &DrawingArea<DB, Shift>) -> Result<()> {
         let total_height = drawing_area.dim_in_pixel().1 as f64;
         let mut volume_height = 0.0;
         if self.options.show_volume {
             volume_height = total_height * 0.2;
         }
 
+        #[allow(unused_mut)]
         let mut metrics_height = 0.0;
         #[cfg(feature = "metrics")]
         if self.options.show_metrics {
@@ -185,6 +179,8 @@ impl Draw {
 
         let price_height = total_height - volume_height - metrics_height;
 
+        #[allow(unused_mut)]
+        #[allow(unused_variables)]
         let (mut metrics_area, mut rest_area) = (drawing_area.clone(), drawing_area.clone());
         #[cfg(feature = "metrics")]
         if self.options.show_metrics {
@@ -198,7 +194,7 @@ impl Draw {
         };
 
         // draw all charts
-        self.draw_price_chart(&price_area, title)?;
+        self.draw_price_chart(&price_area)?;
         if self.options.show_volume {
             self.draw_volume_chart(&volume_area)?;
         }
@@ -211,7 +207,7 @@ impl Draw {
     }
 
     /// Draws the price chart (candlesticks).
-    fn draw_price_chart<DB: DrawingBackend>(&self, drawing_area: &DrawingArea<DB, Shift>, title: &str) -> Result<()> {
+    fn draw_price_chart<DB: DrawingBackend>(&self, drawing_area: &DrawingArea<DB, Shift>) -> Result<()> {
         let min_price = self.candles.iter().map(|c| c.low()).fold(f64::INFINITY, f64::min);
         let max_price = self.candles.iter().map(|c| c.high()).fold(f64::NEG_INFINITY, f64::max);
         let first_time = self.candles.first().ok_or(Error::CandleNotFound)?.open_time();
@@ -227,13 +223,7 @@ impl Draw {
                 Event::WalletUpdate { datetime, balance, .. } => Some((*datetime, *balance)),
                 _ => None,
             })
-            // unique by time
-            .fold(Vec::new(), |mut acc, (datetime, balance)| {
-                if !acc.iter().any(|(d, _)| d == &datetime) {
-                    acc.push((datetime, balance));
-                }
-                acc
-            });
+            .collect::<Vec<_>>();
 
         #[cfg(not(feature = "metrics"))]
         let (min_balance, max_balance) = (0.0, 0.0);
@@ -250,8 +240,13 @@ impl Draw {
             builder.x_label_area_size(X_LABEL_SIZE);
         }
 
+        #[cfg(not(feature = "metrics"))]
+        {
+            let title = self.options.title.as_deref().unwrap_or("BTS Chart");
+            builder.caption(title, ("sans-serif", 30).into_font());
+        }
+
         let mut chart = builder
-            .caption(title, ("sans-serif", 30).into_font())
             .y_label_area_size(Y_LABEL_SIZE)
             .right_y_label_area_size(Y_LABEL_SIZE)
             .build_cartesian_2d(
@@ -273,7 +268,6 @@ impl Draw {
         }
 
         let candle_count = self.candles.len();
-        let x_labels = candle_count / 15;
 
         let mut mesh = chart.configure_mesh();
         mesh.y_desc("Price")
@@ -285,7 +279,7 @@ impl Draw {
         } else {
             mesh.x_desc("Time")
                 .x_label_style(("sans-serif", X_LABEL_SIZE))
-                .x_labels(x_labels);
+                .x_labels(5);
         }
 
         mesh.draw().map_err(|e| Error::Plotters(e.to_string()))?;
@@ -388,15 +382,12 @@ impl Draw {
             .build_cartesian_2d(first_time..last_time, 0.0..max_volume + volume_padding)
             .map_err(|e| Error::Plotters(e.to_string()))?;
 
-        let candle_count = self.candles.len();
-        let x_labels = candle_count / 15;
-
         chart
             .configure_mesh()
             .x_desc("Time")
             .x_label_style(("sans-serif", X_LABEL_SIZE))
             .y_label_style(("sans-serif", Y_LABEL_SIZE))
-            .x_labels(x_labels)
+            .x_labels(5)
             .y_labels(3)
             .draw()
             .map_err(|e| Error::Plotters(e.to_string()))?;
@@ -419,6 +410,7 @@ impl Draw {
     /// Draws the metrics chart (if the "metrics" feature is enabled).
     #[cfg(feature = "metrics")]
     fn draw_metrics_chart<DB: DrawingBackend>(&self, drawing_area: &DrawingArea<DB, Shift>) -> Result<()> {
+        let title = self.options.title.as_deref().unwrap_or("BTS Chart");
         let max_drawdown = self.metrics.max_drawdown();
         let profit_factor = self.metrics.profit_factor();
         let sharpe_ratio = self.metrics.sharpe_ratio(0.0);
@@ -426,6 +418,7 @@ impl Draw {
 
         let drawing_area = drawing_area.margin(30, 0, 70, 70);
         let mut metrics_chart = ChartBuilder::on(&drawing_area)
+            .caption(title, ("sans-serif", 30).into_font())
             .margin(20)
             .build_cartesian_2d(0.0..1.0, 0f64..100f64)
             .map_err(|e| Error::Plotters(e.to_string()))?;
@@ -450,5 +443,64 @@ impl Draw {
             .draw_series([text])
             .map(|_| ())
             .map_err(|e| Error::Plotters(e.to_string()))
+    }
+
+    /// Rendered html version.
+    fn with_html_chart(&self) -> Chart {
+        let min_value = self.candles.iter().map(|c| c.low()).fold(f64::INFINITY, f64::min);
+        let max_value = self.candles.iter().map(|c| c.high()).fold(f64::NEG_INFINITY, f64::max);
+        let title = self.options.title.as_deref().unwrap_or("BTS Chart");
+
+        Chart::new()
+            .title(Title::new().text(title).left("center"))
+            .data_zoom(DataZoom::new().x_axis_index(vec![0, 1]).type_(DataZoomType::Slider))
+            .grid(Grid::new().top("10%").height("50%"))
+            .x_axis(
+                Axis::new().grid_index(0).data(
+                    self.candles
+                        .iter()
+                        .map(|c| c.open_time().date_naive().to_string())
+                        .collect(),
+                ),
+            )
+            .y_axis(
+                Axis::new()
+                    .grid_index(0)
+                    .min((min_value * 0.95) as i64)
+                    .max((max_value * 1.05) as i64)
+                    .axis_label(AxisLabel::new()),
+            )
+            .series(
+                Candlestick::new().data(
+                    self.candles
+                        .iter()
+                        .enumerate()
+                        .map(|(i, c)| {
+                            let open = c.open();
+                            let high = c.high();
+                            let low = c.low();
+                            let close = c.close();
+                            vec![i as f64, open, high, low, close]
+                        })
+                        .collect(),
+                ),
+            )
+            .grid(Grid::new().top("65%").height("10%"))
+            .x_axis(
+                Axis::new().grid_index(1).data(
+                    self.candles
+                        .iter()
+                        .map(|c| c.open_time().date_naive().to_string())
+                        .collect(),
+                ),
+            )
+            .y_axis(Axis::new().grid_index(1))
+            .series(
+                Bar::new()
+                    .x_axis_index(1)
+                    .y_axis_index(1)
+                    .data(self.candles.iter().map(|c| c.volume()).collect()),
+            )
+            .tooltip(Tooltip::new().trigger(Trigger::Axis))
     }
 }

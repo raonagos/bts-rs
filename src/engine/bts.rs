@@ -392,7 +392,6 @@ impl Backtest {
 
         self.positions.append(&mut positions);
         self.wallet.set_unrealized_pnl(total_unrealized_pnl);
-        //? new event wallet
         Ok(())
     }
 
@@ -409,6 +408,11 @@ impl Backtest {
     {
         let candles = Arc::clone(&self.data);
         for candle in candles.iter() {
+            #[cfg(feature = "metrics")]
+            {
+                let open_time = candle.open_time();
+                self.events.push(Event::from((open_time, &self.wallet)));
+            }
             strategy(self, candle)?;
             self.execute_orders(candle)?;
             self.execute_positions(candle)?;
@@ -466,6 +470,11 @@ impl Backtest {
             }
 
             let agg_candles = aggregated_candles_map.values().flatten().collect();
+            #[cfg(feature = "metrics")]
+            {
+                let open_time = candle.open_time();
+                self.events.push(Event::from((open_time, &self.wallet)));
+            }
             strategy(self, agg_candles)?;
             self.execute_orders(candle)?;
             self.execute_positions(candle)?;
