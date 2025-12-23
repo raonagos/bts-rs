@@ -448,7 +448,7 @@ impl Backtest {
                         return Err(Error::NegTakeProfitAndStopLoss);
                     }
 
-                    match position.side {
+                    match position.side() {
                         PositionSide::Long => {
                             if *take_profit > 0.0 && take_profit <= &candle.high() {
                                 Some(*take_profit)
@@ -474,7 +474,7 @@ impl Backtest {
                         return Err(Error::NegZeroTrailingStop);
                     }
 
-                    match position.side {
+                    match position.side() {
                         PositionSide::Long => {
                             let execute_price = price.subpercent(*percent);
                             if execute_price >= candle.low() {
@@ -565,11 +565,6 @@ impl Backtest {
     {
         let candles = Arc::clone(&self.data);
         for candle in candles.iter() {
-            #[cfg(feature = "metrics")]
-            {
-                let open_time = candle.open_time();
-                self.events.push(Event::from((open_time, &self.wallet)));
-            }
             strategy(self, candle)?;
             self.execute_orders(candle)?;
             self.execute_positions(candle)?;
@@ -661,11 +656,6 @@ impl Backtest {
             }
 
             let agg_candles = aggregated_candles_map.values().flatten().collect();
-            #[cfg(feature = "metrics")]
-            {
-                let open_time = candle.open_time();
-                self.events.push(Event::from((open_time, &self.wallet)));
-            }
             strategy(self, agg_candles)?;
             self.execute_orders(candle)?;
             self.execute_positions(candle)?;

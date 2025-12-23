@@ -17,8 +17,7 @@ pub enum PositionSide {
 pub struct Position {
     id: u32,
     order: Order,
-    /// The side of the position, either long or short.
-    pub side: PositionSide,
+    side: PositionSide,
     #[cfg(feature = "metrics")]
     exit_price: Option<f64>,
 }
@@ -36,7 +35,7 @@ impl From<Order> for Position {
             #[cfg(feature = "metrics")]
             exit_price: None,
             order: value,
-            side: match value.side {
+            side: match value.side() {
                 OrderSide::Buy => PositionSide::Long,
                 OrderSide::Sell => PositionSide::Short,
             },
@@ -58,6 +57,17 @@ impl std::ops::DerefMut for Position {
 }
 
 impl Position {
+    /// Returns the position side.
+    pub fn side(&self) -> &PositionSide {
+        &self.side
+    }
+
+    /// Returns the current exit price.
+    #[cfg(feature = "metrics")]
+    pub fn exit_price(&self) -> Option<&f64> {
+        self.exit_price.as_ref()
+    }
+
     #[cfg(feature = "metrics")]
     /// Updates the `exit_price`.
     pub(crate) fn set_exit_price(&mut self, exit_price: f64) -> Result<()> {
@@ -70,7 +80,7 @@ impl Position {
 
     #[cfg(feature = "metrics")]
     /// Returns the estimated profit and loss if it is closed at the `exit_price`.
-    pub(crate) fn pnl(&self) -> Result<f64> {
+    pub fn pnl(&self) -> Result<f64> {
         let exit_price = self.exit_price.ok_or(Error::ExitPrice(0.0))?;
         self.estimate_pnl(exit_price)
     }
@@ -78,8 +88,8 @@ impl Position {
     /// Returns the estimated profit and loss if it is closed at the `exit_price`.
     pub fn estimate_pnl(&self, exit_price: f64) -> Result<f64> {
         let pnl = match self.side {
-            PositionSide::Long => (exit_price - self.entry_price()?) * self.quantity,
-            PositionSide::Short => (self.entry_price()? - exit_price) * self.quantity,
+            PositionSide::Long => (exit_price - self.entry_price()?) * self.quantity(),
+            PositionSide::Short => (self.entry_price()? - exit_price) * self.quantity(),
         };
         Ok(pnl)
     }
@@ -95,7 +105,7 @@ fn create_position_from_buy_order() {
     let position = Position::from(order);
 
     assert_eq!(position.entry_price().unwrap(), 100.0);
-    assert_eq!(position.quantity, 2.0);
+    assert_eq!(position.quantity(), 2.0);
     assert!(matches!(position.side, PositionSide::Long));
     assert_eq!(position.cost().unwrap(), 200.0);
 }
@@ -107,7 +117,7 @@ fn create_position_from_sell_order() {
     let position = Position::from(order);
 
     assert_eq!(position.entry_price().unwrap(), 150.0);
-    assert_eq!(position.quantity, 1.5);
+    assert_eq!(position.quantity(), 1.5);
     assert!(matches!(position.side, PositionSide::Short));
     assert_eq!(position.cost().unwrap(), 225.0);
 }
@@ -142,7 +152,7 @@ fn position_deref() {
     let position = Position::from(order);
 
     assert_eq!(position.entry_price().unwrap(), 100.0);
-    assert_eq!(position.quantity, 2.0);
+    assert_eq!(position.quantity(), 2.0);
     assert!(matches!(position.side, PositionSide::Long));
 }
 
@@ -152,8 +162,8 @@ fn position_deref_mut() {
     let order: Order = (OrderType::Market(100.0), 2.0, OrderSide::Buy).into();
     let mut position = Position::from(order);
 
-    position.quantity = 3.0;
-    assert_eq!(position.quantity, 3.0);
+    position.set_quantity(3.0);
+    assert_eq!(position.quantity(), 3.0);
 }
 
 #[cfg(test)]
@@ -191,7 +201,7 @@ fn position_with_exit_rule() {
     let position = Position::from(order);
 
     assert_eq!(position.entry_price().unwrap(), 100.0);
-    assert_eq!(position.quantity, 1.5);
+    assert_eq!(position.quantity(), 1.5);
     assert!(matches!(position.side, PositionSide::Short));
     assert!(matches!(
         position.exit_rule(),

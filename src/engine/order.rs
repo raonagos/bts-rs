@@ -34,7 +34,7 @@ pub enum OrderType {
     /// * `0` - The limit price for the order.
     Limit(f64),
 
-    /// Combined take-profit and stop-loss exit rule for a position.
+    /// Combined take-profit and stop-loss **exit rule** for a position.
     ///
     /// When either the take-profit or stop-loss price is reached, the position will be closed.
     ///
@@ -43,7 +43,7 @@ pub enum OrderType {
     /// * `1` - The stop-loss price (0.0 to disable)
     TakeProfitAndStopLoss(f64, f64),
 
-    /// Trailing stop exit rule for a position.
+    /// Trailing stop **exit rule** for a position.
     ///
     /// The stop price trails the market price by a specified percentage.
     /// For long positions, the stop moves up as the price increases.
@@ -66,15 +66,23 @@ impl OrderType {
 }
 
 /// Represents an order with entry and exit rules.
+///
+/// ### Examples
+/// ```rust
+/// use bts_rs::prelude::*;
+///
+/// // (OrderType, quantity, OrderSide)
+/// let order = Order::from((OrderType::Market(101.15), 1.0, OrderSide::Sell));
+/// // (OrderType (entry rule type), OrderType (exit rule type), quantity, OrderSide)
+/// let order = Order::from((OrderType::Market(101.15), OrderType::TrailingStop(101.15, 2.0), 1.0, OrderSide::Sell));
+/// ```
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Copy)]
 pub struct Order {
     id: u32,
+    quantity: f64,
+    side: OrderSide,
     entry_type: OrderType,
-    /// Represents the volume of the order.
-    pub quantity: f64,
-    /// Represents the buy/sell side of the order.
-    pub side: OrderSide,
     exit_type: Option<OrderType>,
 }
 
@@ -111,13 +119,29 @@ impl From<O2> for Order {
 }
 
 impl Order {
+    /// Returns the quantity of the order.
+    pub fn quantity(&self) -> f64 {
+        self.quantity
+    }
+
+    /// Updates the quantity.
+    #[cfg(test)]
+    pub(crate) fn set_quantity(&mut self, new_quantity: f64) {
+        self.quantity = new_quantity;
+    }
+
+    /// Returns the order side.
+    pub fn side(&self) -> &OrderSide {
+        &self.side
+    }
+
     /// Returns the entry price of the order.
     pub fn entry_price(&self) -> Result<f64> {
         self.entry_type.inner()
     }
 
     /// Returns the total cost of the order (price * quantity).
-    pub(crate) fn cost(&self) -> Result<f64> {
+    pub fn cost(&self) -> Result<f64> {
         let inner = self.entry_type.inner()?;
         Ok(inner * self.quantity)
     }
@@ -128,17 +152,17 @@ impl Order {
     }
 
     /// Returns the exit rule of the order, if any.
-    pub fn exit_rule(&self) -> &Option<OrderType> {
-        &self.exit_type
+    pub fn exit_rule(&self) -> Option<&OrderType> {
+        self.exit_type.as_ref()
     }
 
-    /// Returns true if it is a market order, and false if it is a limit order.
+    /// Returns true if it is a market order, and false if not.
     pub fn is_market_type(&self) -> bool {
         matches!(self.entry_type, OrderType::Market(_))
     }
 
     /// Updates the trailing stop price for the order.
-    pub fn set_trailingstop(&mut self, new_price: f64) {
+    pub(crate) fn set_trailingstop(&mut self, new_price: f64) {
         if let Some(OrderType::TrailingStop(current_price, _)) = &mut self.exit_type {
             match self.side {
                 OrderSide::Buy => {

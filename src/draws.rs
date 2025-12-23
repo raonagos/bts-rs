@@ -35,7 +35,7 @@ pub enum DrawOutput {
     Svg(String),
     /// Save to the output PNG file.
     Png(String),
-    /// Save to the output HTML file (not implemented).
+    /// Save to the output HTML file.
     Html(String),
     /// Print to the current console (not implemented).
     #[default]

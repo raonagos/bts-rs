@@ -4,16 +4,11 @@ use crate::errors::{Error, Result};
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Clone, Copy)]
 pub struct Wallet {
-    // Initial balance used for reset
-    initial_balance: f64,
-    // Available balance
-    balance: f64,
-    // Funds locked in open positions
-    locked: f64,
-    // Unrealized profit/loss from open positions
-    unrealized_pnl: f64,
-    // Cumulative fees paid
     fees: f64,
+    locked: f64,
+    balance: f64,
+    unrealized_pnl: f64,
+    initial_balance: f64,
 }
 
 impl Wallet {
