@@ -103,7 +103,7 @@ The crate includes three main optional features to extend its functionality:
 Add BTS to your `Cargo.toml`:
 ```toml
 [dependencies]
-bts_rs = "1.0.1"
+bts_rs = "1.0.11"
 ```
 
 Then import and use it in your project:

@@ -54,7 +54,7 @@
 //! ### 1. Add BTS to your project:
 //! ```toml
 //! [dependencies]
-//! bts_rs = "1.0.1"
+//! bts_rs = "1.0.11"
 //! ta = "0.5.0"  # Optional: For technical analysis indicators
 //! ```
 //!
