@@ -11,13 +11,13 @@
 //! This module defines the `Event` enum, which represents actions and state changes
 //! during a backtest, such as order execution, position updates, and wallet changes.
 //!
-//! It needs to enable `metrics` feature to use it. Take a look at [trailing stop](https://github.com/raonagos/bts-rs/blob/master/examples/trailing_stop.rs#L62) for example.
+//! Enable the `metrics` feature to use it. See the [trailing stop](https://github.com/raonagos/bts-rs/blob/master/examples/trailing_stop.rs) example.
 //!
 //! # What the numbers are
 //!
 //! Every metric is computed from the **mark-to-market equity** of the account
 //! (`cash + cost + unrealized pnl` of the open positions), sampled once per bar by
-//! [`Backtest::run`](crate::engine::Backtest::run) as an [`Event::WalletUpdate`].
+//! [`Backtest::run`](crate::engine::Backtest::run) as an [`Event::WalletUpdate`](crate::metrics::Event::WalletUpdate).
 //!
 //! - `max_drawdown` is the largest peak-to-trough decline of that equity curve, in
 //!   percent. It is not the position size, and it does not depend on how large the
@@ -27,8 +27,8 @@
 //!   inferred from the event timestamps (and can be overridden), so the number is
 //!   comparable to a published Sharpe.
 //! - `profit_factor` and `win_rate` are computed on the **net** profit and loss of
-//!   each closed trade: the gross `(exit - entry) * quantity` minus the market or
-//!   limit fee charged on both sides.
+//!   each closed trade: the gross `(exit - entry) * quantity` minus the fee charged on
+//!   the entry notional and the fee charged on the exit notional.
 
 use std::fmt;
 
@@ -102,7 +102,7 @@ impl From<(DateTime<Utc>, &Wallet)> for Event {
             balance: value.balance(),
             equity: value.total_balance(),
             pnl: value.total_balance() - value.initial_balance(),
-            free: value.free_balance().expect("should give the free balance"),
+            free: value.balance() - value.locked(),
         }
     }
 }
@@ -113,6 +113,7 @@ impl From<(DateTime<Utc>, &Wallet)> for Event {
 /// for a trading strategy, such as max drawdown, profit factor, Sharpe ratio, and win rate.
 /// It is typically constructed from a `Backtest` or a list of `Event`s.
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone)]
 pub struct Metrics {
     fees: f64,
     balance: f64,
@@ -143,7 +144,7 @@ impl Metrics {
     ///
     /// Trade fees are unknown here, so [`profit_factor`](Self::profit_factor) and
     /// [`win_rate`](Self::win_rate) are gross unless [`with_market_fees`](Self::with_market_fees)
-    /// is called with the backtest's fee rates. [`Metrics::from(&Backtest)`] does that for you.
+    /// is called with the backtest's fee rates. `Metrics::from(&backtest)` does that for you.
     pub fn new(events: Vec<Event>, initial_balance: f64, balance: f64, equity: f64, fees: f64) -> Self {
         Self {
             fees,
@@ -160,6 +161,7 @@ impl Metrics {
     ///
     /// The tuple is `(market, limit)` as a **fraction** (`0.001` for 0.1%), the same
     /// convention as [`Backtest::market_fees`](crate::engine::Backtest::market_fees).
+    /// Note that [`Backtest::new`](crate::engine::Backtest::new) takes **percentages**.
     pub fn with_market_fees(mut self, market_fees: Option<(f64, f64)>) -> Self {
         self.market_fees = market_fees;
         self
@@ -244,11 +246,18 @@ impl Metrics {
 
     /// Returns the net profit and loss of one closed trade, fees included.
     ///
-    /// Both sides are charged the fee rate of the position's entry type, on the notional
-    /// of the position: `gross pnl - 2 * cost * rate`.
+    /// The entry and exit notionals are charged the fee rate of the position's
+    /// entry type: `gross pnl - (entry_notional + exit_notional) * rate`.
     fn net_trade_pnl(&self, position: &Position) -> f64 {
         let gross = position.pnl().unwrap_or(0.0);
-        let cost = position.cost().unwrap_or(0.0);
+        let entry_notional = position.cost().unwrap_or(0.0);
+        // The caller records the exit price on the `DelPosition` event. If it is
+        // absent (a hand-built event), fall back to the entry notional on both
+        // sides rather than silently dropping the exit fee.
+        let exit_notional = match position.exit_price() {
+            Some(price) if position.entry_price().is_ok() => price * position.quantity(),
+            _ => entry_notional,
+        };
         let rate = match self.market_fees {
             Some((market_fee, limit_fee)) => {
                 if position.is_market_type() {
@@ -259,7 +268,7 @@ impl Metrics {
             }
             None => 0.0,
         };
-        gross - cost * rate * 2.0
+        gross - (entry_notional + exit_notional) * rate
     }
 
     /// Returns the net result of every closed trade.
@@ -347,7 +356,7 @@ impl Metrics {
         self.sharpe_ratio_with(risk_free_rate, periods_per_year)
     }
 
-    /// Computes the anualised Sharpe ratio with an explicit number of bars per year.
+    /// Computes the annualised Sharpe ratio with an explicit number of bars per year.
     pub fn sharpe_ratio_with(&self, risk_free_rate: f64, periods_per_year: f64) -> f64 {
         if !(periods_per_year.is_finite() && periods_per_year > 0.0) {
             return 0.0;
@@ -499,13 +508,13 @@ fn profit_factor() {
 #[cfg(test)]
 #[test]
 fn profit_factor_net_of_fees() {
-    // the trade gains 1.0 and pays 0.1% of a 100 notional on both sides = 0.2
+    // the trade gains 1.0 and pays 0.1% on a 100 entry and a 101 exit = 0.201
     let mut position = create_position(1.0);
     position.set_exit_price(101.0).unwrap();
     let events = vec![Event::DelPosition(DateTime::default(), position)];
     let metrics = Metrics::new(events, 10000.0, 0.0, 0.0, 0.0).with_market_fees(Some((0.001, 0.001)));
     assert_eq!(metrics.win_rate(), 100.0);
-    assert!((metrics.net_trade_pnl(&position) - 0.8).abs() < 1e-12);
+    assert!((metrics.net_trade_pnl(&position) - 0.799).abs() < 1e-12);
 }
 
 #[cfg(test)]

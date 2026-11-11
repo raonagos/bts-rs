@@ -1,33 +1,108 @@
-name: Rust
+name: CI
 
 on:
+  push:
+    branches: [master]
   pull_request:
-    branches: [ "master" ]
+    branches: [master]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
 
 jobs:
-  build:
-
+  test:
+    name: test / all features
     runs-on: ubuntu-latest
-
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    - name: Simple check
-      run: cargo check --verbose
-    - name: Apt update
-      run: sudo apt update
-    - name: Install font for draws feature
-      run: sudo apt install -y libfontconfig1-dev
-    - name: Check features
-      run: cargo check --all-features --verbose
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
 
-    - name: Run simple test
-      run: cargo test --verbose
-    - name: Test features
-      run: cargo test --all-features --verbose
+      - uses: Swatinem/rust-cache@v2
 
-    - name: Check examples
-      run: cargo check --examples --all-features --verbose
+      - name: Install fontconfig (needed by the draws feature)
+        run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev
+
+      - name: Format
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Test
+        run: cargo test --all-features --locked
+
+      - name: Documentation
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --all-features --no-deps --locked
+
+  features:
+    name: check / ${{ matrix.features }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        features:
+          - metrics
+          - optimizer
+          - draws
+          - serde
+          - metrics,draws,optimizer,serde
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: features-${{ replace(matrix.features, ',', '-') }}
+
+      - name: Install fontconfig (needed by the draws feature)
+        if: contains(matrix.features, 'draws')
+        run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev
+
+      - name: Check the core crate without optional features
+        run: cargo check --locked --no-default-features
+
+      - name: Check the feature combination
+        run: cargo check --locked --no-default-features --features "${{ matrix.features }}"
+
+  wasm:
+    name: check / wasm32
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Check the engine for wasm32
+        run: cargo check --locked --target wasm32-unknown-unknown --no-default-features --features wasm
+
+  msrv:
+    name: check / MSRV 1.88
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@1.88.0
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install fontconfig (needed by the draws feature)
+        run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev
+
+      - name: Check the declared minimum supported Rust version
+        run: cargo check --locked --all-features

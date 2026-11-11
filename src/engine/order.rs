@@ -2,7 +2,7 @@ use crate::{errors::*, utils::random_id};
 
 /// Represents the side of an order (buy or sell).
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum OrderSide {
     /// A buy order, where the trader wants to purchase an asset.
     Buy,

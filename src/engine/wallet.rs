@@ -145,20 +145,6 @@ impl Wallet {
         self.positions_value += amount;
     }
 
-    /// Removes a closed position (`cost + pnl`) from the book.
-    pub(crate) fn sub_positions_value(&mut self, amount: f64) {
-        self.positions_value -= amount;
-    }
-
-    /// Subtracts the given amount from the wallet's unrealized P&L.
-    ///
-    /// This function is used when a closed position's last mark has to be removed
-    /// from the aggregate. Pass the position's P&L, **not** its cost: the cost lives
-    /// in [`positions_value`](Self::positions_value) and is removed there.
-    pub(crate) fn sub_pnl(&mut self, amount: f64) {
-        self.unrealized_pnl -= amount;
-    }
-
     /// Resets the wallet to its initial balance.
     pub(crate) fn reset(&mut self) {
         self.fees = 0.0;
@@ -352,8 +338,8 @@ fn equity_is_cash_plus_positions_value() {
 
     // closing the position at its mark leaves equity untouched
     wallet.add(990.0).unwrap();
-    wallet.sub_positions_value(990.0);
-    wallet.sub_pnl(90.0);
+    wallet.set_positions_value(0.0);
+    wallet.set_unrealized_pnl(0.0);
     assert_eq!(wallet.balance(), 1090.0);
     assert_eq!(wallet.total_balance(), 1090.0);
 }

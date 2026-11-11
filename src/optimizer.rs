@@ -4,7 +4,7 @@
 //! The `Optimizer` struct handles the execution of backtests for each combination, while the
 //! `ParameterCombination` trait defines how to generate parameter sets.
 //!
-//! It needs to enable `optimizer` feature to use it. Take a look at [parallelize parameters optimization](https://github.com/raonagos/bts-rs/blob/master/examples/par_parameters_optimization.rs) for example.
+//! Enable the `optimizer` feature to use it. See the [parallel parameter optimization](https://github.com/raonagos/bts-rs/blob/master/examples/par_parameters_optimization.rs) example.
 
 use std::marker::PhantomData;
 use std::sync::Arc;
@@ -58,7 +58,7 @@ impl<PC: ParameterCombination> Optimizer<PC> {
     /// # Arguments
     /// * `data` - Historical candle data for backtesting.
     /// * `initial_balance` - Starting balance for the backtest.
-    /// * `market_fees` - Optional tuple of (maker fee, taker fee).
+    /// * `market_fees` - Optional tuple of (market fee, limit fee), as percentages.
     ///
     /// # Returns
     /// A new `Optimizer` instance.
