@@ -258,11 +258,11 @@ impl Draw {
         let price_padding = price_range * 0.1;
 
         #[cfg(feature = "metrics")]
-        let balances = self
+        let equity_curve = self
             .metrics
             .events()
             .filter_map(|evt| match evt {
-                Event::WalletUpdate { datetime, balance, .. } => Some((*datetime, *balance)),
+                Event::WalletUpdate { datetime, equity, .. } => Some((*datetime, *equity)),
                 _ => None,
             })
             .collect::<Vec<_>>();
@@ -271,8 +271,8 @@ impl Draw {
         let (min_balance, max_balance) = (0.0, 0.0);
         #[cfg(feature = "metrics")]
         let (min_balance, max_balance) = (
-            balances.iter().map(|(_, b)| *b).fold(f64::INFINITY, f64::min),
-            balances.iter().map(|(_, b)| *b).fold(f64::NEG_INFINITY, f64::max),
+            equity_curve.iter().map(|(_, b)| *b).fold(f64::INFINITY, f64::min),
+            equity_curve.iter().map(|(_, b)| *b).fold(f64::NEG_INFINITY, f64::max),
         );
 
         let (top, bottom) = if self.options.show_volume { (0, 0) } else { (10, 10) };
@@ -376,8 +376,8 @@ impl Draw {
             use crate::PercentCalculus;
 
             let initial_balance = self.metrics.initial_balance();
-            let red_balances = balances.iter().filter(|(_, balance)| *balance < initial_balance);
-            let blue_balances = balances.iter().filter(|(_, balance)| *balance >= initial_balance);
+            let red_balances = equity_curve.iter().filter(|(_, balance)| *balance < initial_balance);
+            let blue_balances = equity_curve.iter().filter(|(_, balance)| *balance >= initial_balance);
 
             let opened_positions = self
                 .metrics

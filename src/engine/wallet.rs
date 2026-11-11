@@ -8,6 +8,7 @@ pub struct Wallet {
     locked: f64,
     balance: f64,
     unrealized_pnl: f64,
+    positions_value: f64,
     initial_balance: f64,
 }
 
@@ -24,6 +25,7 @@ impl Wallet {
             fees: 0.0,
             locked: 0.0,
             unrealized_pnl: 0.0,
+            positions_value: 0.0,
             initial_balance: balance,
         })
     }
@@ -48,14 +50,29 @@ impl Wallet {
         self.fees
     }
 
-    /// Returns the balance.
+    /// Returns the balance: the cash that is not invested in open positions.
+    ///
+    /// This is **not** the account value. A wallet holding a 900 position on a 1,000
+    /// account has `balance() == 100` and [`total_balance()`](Self::total_balance) `1000`.
     pub fn balance(&self) -> f64 {
         self.balance
     }
 
-    /// Returns the total balance.
+    /// Returns the market value of the open positions (`cost + unrealized pnl`).
+    pub fn positions_value(&self) -> f64 {
+        self.positions_value
+    }
+
+    /// Returns the total balance, i.e. the mark-to-market account value:
+    /// `balance() + positions_value()`.
     pub fn total_balance(&self) -> f64 {
-        self.balance + self.unrealized_pnl
+        self.balance + self.positions_value
+    }
+
+    /// Returns the mark-to-market account value, an alias of
+    /// [`total_balance()`](Self::total_balance).
+    pub fn equity(&self) -> f64 {
+        self.total_balance()
     }
 
     /// Returns the free balance (available for new trades).
@@ -118,10 +135,26 @@ impl Wallet {
         self.unrealized_pnl = pnl;
     }
 
+    /// Updates the market value of the open positions.
+    pub(crate) fn set_positions_value(&mut self, value: f64) {
+        self.positions_value = value;
+    }
+
+    /// Adds the cost of a newly opened position to the book.
+    pub(crate) fn add_positions_value(&mut self, amount: f64) {
+        self.positions_value += amount;
+    }
+
+    /// Removes a closed position (`cost + pnl`) from the book.
+    pub(crate) fn sub_positions_value(&mut self, amount: f64) {
+        self.positions_value -= amount;
+    }
+
     /// Subtracts the given amount from the wallet's unrealized P&L.
     ///
-    /// This function is used when a position's unrealized P&L needs to be adjusted,
-    /// typically when a position is closed and its P&L becomes realized.
+    /// This function is used when a closed position's last mark has to be removed
+    /// from the aggregate. Pass the position's P&L, **not** its cost: the cost lives
+    /// in [`positions_value`](Self::positions_value) and is removed there.
     pub(crate) fn sub_pnl(&mut self, amount: f64) {
         self.unrealized_pnl -= amount;
     }
@@ -131,6 +164,7 @@ impl Wallet {
         self.fees = 0.0;
         self.locked = 0.0;
         self.unrealized_pnl = 0.0;
+        self.positions_value = 0.0;
         self.balance = self.initial_balance;
     }
 }
@@ -290,11 +324,36 @@ fn unrealized_pnl() {
     let mut wallet = Wallet::new(100.0).unwrap();
     wallet.set_unrealized_pnl(10.0); // unrealized gain
     assert_eq!(wallet.unrealized_pnl, 10.0);
-    assert_eq!(wallet.total_balance(), 110.0);
+    assert_eq!(wallet.total_balance(), 100.0); // unrealized pnl alone is not equity
     assert_eq!(wallet.free_balance().unwrap(), 100.0);
 
     wallet.set_unrealized_pnl(-5.0); // unrealized loss
     assert_eq!(wallet.unrealized_pnl, -5.0);
-    assert_eq!(wallet.total_balance(), 95.0);
+    assert_eq!(wallet.total_balance(), 100.0);
     assert_eq!(wallet.free_balance().unwrap(), 100.0);
+}
+
+#[cfg(test)]
+#[test]
+fn equity_is_cash_plus_positions_value() {
+    let mut wallet = Wallet::new(1000.0).unwrap();
+
+    // 900 notional on a 1,000 account: cash 100, position worth 900, equity 1,000
+    wallet.lock(900.0).unwrap();
+    wallet.sub(900.0).unwrap();
+    wallet.add_positions_value(900.0);
+    wallet.set_unrealized_pnl(90.0);
+    wallet.set_positions_value(990.0); // marked at 110
+
+    assert_eq!(wallet.balance(), 100.0);
+    assert_eq!(wallet.positions_value(), 990.0);
+    assert_eq!(wallet.total_balance(), 1090.0);
+    assert_eq!(wallet.equity(), 1090.0);
+
+    // closing the position at its mark leaves equity untouched
+    wallet.add(990.0).unwrap();
+    wallet.sub_positions_value(990.0);
+    wallet.sub_pnl(90.0);
+    assert_eq!(wallet.balance(), 1090.0);
+    assert_eq!(wallet.total_balance(), 1090.0);
 }

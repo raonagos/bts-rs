@@ -216,11 +216,7 @@ impl Backtest {
         self.wallet.lock(order.cost()?)?;
         self.orders.push_back(order);
         #[cfg(feature = "metrics")]
-        {
-            let open_time = _candle.open_time();
-            self.events.push(Event::from((open_time, &self.wallet)));
-            self.events.push(Event::AddOrder(open_time, order));
-        }
+        self.events.push(Event::AddOrder(_candle.open_time(), order));
         Ok(())
     }
 
@@ -268,31 +264,26 @@ impl Backtest {
         }
         self.wallet.unlock(order.cost()?)?;
         #[cfg(feature = "metrics")]
-        {
-            let open_time = _candle.open_time();
-            self.events.push(Event::DelOrder(open_time, *order));
-            self.events.push(Event::from((open_time, &self.wallet)));
-        }
+        self.events.push(Event::DelOrder(_candle.open_time(), *order));
         Ok(())
     }
 
     /// Opens a new position.
     fn open_position(&mut self, _candle: &Candle, position: Position) -> Result<()> {
-        self.wallet.sub(position.cost()?)?;
+        let cost = position.cost()?;
+        self.wallet.sub(cost)?;
+        // the cash left the wallet but did not leave the account: it is now a position
+        self.wallet.add_positions_value(cost);
         if let Some((market_fee, limit_fee)) = self.market_fees {
             if position.is_market_type() {
-                self.wallet.sub_fees(position.cost()? * market_fee)?;
+                self.wallet.sub_fees(cost * market_fee)?;
             } else {
-                self.wallet.sub_fees(position.cost()? * limit_fee)?;
+                self.wallet.sub_fees(cost * limit_fee)?;
             };
         }
         self.positions.push_back(position);
         #[cfg(feature = "metrics")]
-        {
-            let open_time = _candle.open_time();
-            self.events.push(Event::from((open_time, &self.wallet)));
-            self.events.push(Event::AddPosition(open_time, position));
-        }
+        self.events.push(Event::AddPosition(_candle.open_time(), position));
         Ok(())
     }
 
@@ -361,7 +352,10 @@ impl Backtest {
         let pnl = position.estimate_pnl(exit_price)?;
         let total_amount = pnl + position.cost()?;
         self.wallet.add(total_amount)?;
-        self.wallet.sub_pnl(total_amount);
+        // the position leaves the book at its exit value; the cash arrived instead
+        self.wallet.sub_positions_value(total_amount);
+        // drop this position's last mark from the aggregate, *not* its notional
+        self.wallet.sub_pnl(pnl);
         if let Some((market_fee, limit_fee)) = self.market_fees {
             if position.is_market_type() {
                 self.wallet.sub_fees(position.cost()? * market_fee)?;
@@ -373,9 +367,7 @@ impl Backtest {
         {
             let mut _position = *position;
             _position.set_exit_price(exit_price)?;
-            let open_time = _candle.open_time();
-            self.events.push(Event::from((open_time, &self.wallet)));
-            self.events.push(Event::DelPosition(open_time, _position));
+            self.events.push(Event::DelPosition(_candle.open_time(), _position));
         }
         Ok(pnl)
     }
@@ -438,10 +430,25 @@ impl Backtest {
     }
 
     /// Executes position management (take-profit, stop-loss, trailing stop).
+    #[cfg(test)]
     fn execute_positions(&mut self, candle: &Candle) -> Result<()> {
+        self.execute_positions_except(candle, 0)
+    }
+
+    /// Executes position management for every position except the `unmanaged_tail`
+    /// last ones, which were opened on this very bar and must not be tested against
+    /// the same bar's high and low.
+    fn execute_positions_except(&mut self, candle: &Candle, unmanaged_tail: usize) -> Result<()> {
         let mut positions = VecDeque::with_capacity(self.positions.len());
+        let managed = self.positions.len().saturating_sub(unmanaged_tail);
+        let mut seen = 0usize;
 
         while let Some(mut position) = self.positions.pop_front() {
+            seen += 1;
+            if seen > managed {
+                positions.push_back(position);
+                continue;
+            }
             let should_close = match position.exit_rule() {
                 Some(OrderType::TakeProfitAndStopLoss(take_profit, stop_loss)) => {
                     if *take_profit < 0.0 || *stop_loss < 0.0 {
@@ -514,15 +521,18 @@ impl Backtest {
         }
 
         let mut total_unrealized_pnl = 0.0;
+        let mut total_value = 0.0;
         for position in &positions {
-            // calculate unrealized P&L for this position
+            // mark every open position at this bar's close
             let current_price = candle.close();
             let pnl = position.estimate_pnl(current_price)?;
             total_unrealized_pnl += pnl;
+            total_value += position.cost()? + pnl;
         }
 
         self.positions.append(&mut positions);
         self.wallet.set_unrealized_pnl(total_unrealized_pnl);
+        self.wallet.set_positions_value(total_value);
         Ok(())
     }
 
@@ -565,12 +575,28 @@ impl Backtest {
     {
         let candles = Arc::clone(&self.data);
         for candle in candles.iter() {
-            strategy(self, candle)?;
+            // Orders and exits act on the bar *after* the one that revealed them: the
+            // strategy of bar `t` has already read `t`'s high and low, so nothing it
+            // posts may be filled against them.
+            let opened_before = self.positions.len();
             self.execute_orders(candle)?;
-            self.execute_positions(candle)?;
+            let opened_now = self.positions.len() - opened_before;
+            self.execute_positions_except(candle, opened_now)?;
+            self.mark_equity(candle);
+            strategy(self, candle)?;
         }
         Ok(())
     }
+
+    /// Samples the account value once per bar, at the bar's close.
+    #[cfg(feature = "metrics")]
+    fn mark_equity(&mut self, _candle: &Candle) {
+        self.events.push(Event::from((_candle.open_time(), &self.wallet)));
+    }
+
+    /// Samples the account value once per bar, at the bar's close.
+    #[cfg(not(feature = "metrics"))]
+    fn mark_equity(&mut self, _candle: &Candle) {}
 
     /// Runs the backtest with aggregation, executing the provided function for each candle
     /// and its aggregated versions.
@@ -656,9 +682,12 @@ impl Backtest {
             }
 
             let agg_candles = aggregated_candles_map.values().flatten().collect();
-            strategy(self, agg_candles)?;
+            let opened_before = self.positions.len();
             self.execute_orders(candle)?;
-            self.execute_positions(candle)?;
+            let opened_now = self.positions.len() - opened_before;
+            self.execute_positions_except(candle, opened_now)?;
+            self.mark_equity(candle);
+            strategy(self, agg_candles)?;
         }
 
         Ok(())
@@ -896,7 +925,7 @@ mod tests {
 
             assert!(!bt.positions.is_empty());
             assert_eq!(bt.balance(), 899.0);
-            assert_eq!(bt.total_balance(), 899.0);
+            assert_eq!(bt.total_balance(), 999.0);
             assert_eq!(bt.free_balance().unwrap(), 1000.0 - expected_total_cost);
 
             let candle = bt.next().unwrap();
@@ -933,7 +962,7 @@ mod tests {
 
         assert!(!bt.positions.is_empty());
         assert_eq!(bt.balance(), 899.0);
-        assert_eq!(bt.total_balance(), 899.0);
+        assert_eq!(bt.total_balance(), 999.0);
         assert_eq!(bt.free_balance().unwrap(), 1000.0 - expected_total_cost);
 
         let candle = bt.next().unwrap();
@@ -1022,7 +1051,7 @@ mod tests {
         assert!(bt.orders.is_empty());
         assert!(!bt.positions.is_empty());
         assert_eq!(bt.balance(), 900.0);
-        assert_eq!(bt.total_balance(), 900.0);
+        assert_eq!(bt.total_balance(), 1000.0);
         assert_eq!(bt.free_balance().unwrap(), 900.0);
 
         bt.execute_positions(&candle).unwrap();
@@ -1034,7 +1063,7 @@ mod tests {
 
         assert!(!bt.positions.is_empty());
         assert_eq!(bt.balance(), 900.0);
-        assert_eq!(bt.total_balance(), 910.0); // balance + p&l
+        assert_eq!(bt.total_balance(), 1010.0); // balance + p&l
         assert_eq!(bt.free_balance().unwrap(), 900.0);
 
         // next tick
@@ -1071,7 +1100,7 @@ mod tests {
         assert!(bt.orders.is_empty());
         assert!(!bt.positions.is_empty());
         assert_eq!(bt.balance(), 860.0);
-        assert_eq!(bt.total_balance(), 860.0);
+        assert_eq!(bt.total_balance(), 1000.0);
         assert_eq!(bt.free_balance().unwrap(), 860.0);
 
         bt.execute_positions(&candle).unwrap();
@@ -1083,7 +1112,7 @@ mod tests {
 
         assert!(!bt.positions.is_empty());
         assert_eq!(bt.balance(), 860.0);
-        assert_eq!(bt.total_balance(), 850.0); // balance + p&l
+        assert_eq!(bt.total_balance(), 990.0); // balance + p&l
         assert_eq!(bt.free_balance().unwrap(), 860.0);
 
         // next tick
@@ -1120,7 +1149,7 @@ mod tests {
         assert!(bt.orders.is_empty());
         assert!(!bt.positions.is_empty());
         assert_eq!(bt.balance(), 860.0);
-        assert_eq!(bt.total_balance(), 860.0);
+        assert_eq!(bt.total_balance(), 1000.0);
         assert_eq!(bt.free_balance().unwrap(), 860.0);
 
         bt.execute_positions(&candle).unwrap();
@@ -1132,7 +1161,7 @@ mod tests {
 
         assert!(!bt.positions.is_empty());
         assert_eq!(bt.balance(), 860.0);
-        assert_eq!(bt.total_balance(), 870.0); // balance + p&l
+        assert_eq!(bt.total_balance(), 1010.0); // balance + p&l
         assert_eq!(bt.free_balance().unwrap(), 860.0);
 
         // next tick
@@ -1169,7 +1198,7 @@ mod tests {
         assert!(bt.orders.is_empty());
         assert!(!bt.positions.is_empty());
         assert_eq!(bt.balance(), 900.0);
-        assert_eq!(bt.total_balance(), 900.0);
+        assert_eq!(bt.total_balance(), 1000.0);
         assert_eq!(bt.free_balance().unwrap(), 900.0);
 
         bt.execute_positions(&candle).unwrap();
@@ -1181,7 +1210,7 @@ mod tests {
 
         assert!(!bt.positions.is_empty());
         assert_eq!(bt.balance(), 900.0);
-        assert_eq!(bt.total_balance(), 890.0); // balance + p&l
+        assert_eq!(bt.total_balance(), 990.0); // balance + p&l
         assert_eq!(bt.free_balance().unwrap(), 900.0);
 
         // next tick
@@ -1213,7 +1242,7 @@ mod tests {
 
         assert!(!bt.positions.is_empty());
         assert_eq!(bt.balance(), 900.0);
-        assert_eq!(bt.total_balance(), 900.0);
+        assert_eq!(bt.total_balance(), 1000.0);
         assert_eq!(bt.free_balance().unwrap(), 900.0);
 
         bt.execute_positions(&candle).unwrap();
@@ -1225,7 +1254,7 @@ mod tests {
 
         assert!(!bt.positions.is_empty());
         assert_eq!(bt.balance(), 900.0);
-        assert_eq!(bt.total_balance(), 908.0);
+        assert_eq!(bt.total_balance(), 1008.0);
         assert_eq!(bt.free_balance().unwrap(), 900.0);
 
         // next tick
@@ -1233,7 +1262,7 @@ mod tests {
         bt.execute_positions(&candle).unwrap();
         assert!(!bt.positions.is_empty());
         assert_eq!(bt.balance(), 900.0);
-        assert_eq!(bt.total_balance(), 935.0);
+        assert_eq!(bt.total_balance(), 1035.0);
         assert_eq!(bt.free_balance().unwrap(), 900.0);
 
         // next tick
@@ -1264,7 +1293,7 @@ mod tests {
 
         assert!(!bt.positions.is_empty());
         assert_eq!(bt.balance(), 900.0);
-        assert_eq!(bt.total_balance(), 900.0);
+        assert_eq!(bt.total_balance(), 1000.0);
         assert_eq!(bt.free_balance().unwrap(), 900.0);
 
         bt.execute_positions(&candle).unwrap();
@@ -1278,6 +1307,86 @@ mod tests {
         assert_eq!(bt.balance(), 990.0);
         assert_eq!(bt.total_balance(), 990.0);
         assert_eq!(bt.free_balance().unwrap(), 990.0);
+    }
+
+    fn bar(open: f64, high: f64, low: f64, close: f64, i: i64) -> Candle {
+        CandleBuilder::builder()
+            .open(open)
+            .high(high)
+            .low(low)
+            .close(close)
+            .volume(1.0)
+            .bid(0.0)
+            .open_time(DateTime::from_timestamp_secs(1_600_000_000 + i * 3600).unwrap())
+            .close_time(DateTime::from_timestamp_secs(1_600_000_000 + (i + 1) * 3600).unwrap())
+            .build()
+            .unwrap()
+    }
+
+    #[test]
+    fn limit_order_cannot_fill_on_the_bar_that_placed_it() {
+        // The strategy of bar 0 reads `low()` = 90 and posts a limit there. Bar 1 never
+        // trades that low, so the order must stay pending: the old engine filled it on
+        // bar 0's own range, on a price the strategy had just read.
+        let data = Arc::from_iter(vec![
+            bar(100.0, 110.0, 90.0, 105.0, 0),
+            bar(100.0, 101.0, 99.0, 100.0, 1),
+        ]);
+        let mut bt = Backtest::new(data, 1000.0, None).unwrap();
+
+        bt.run(|bt, candle| {
+            if candle.high() == 110.0 {
+                let order = Order::from((OrderType::Limit(candle.low()), 1.0, OrderSide::Buy));
+                bt.place_order(candle, order)?;
+            }
+            Ok(())
+        })
+        .unwrap();
+
+        assert!(bt.positions().next().is_none());
+        assert_eq!(bt.orders().count(), 1); // still pending, not filled
+        assert_eq!(bt.balance(), 1000.0);
+        assert_eq!(bt.total_balance(), 1000.0);
+    }
+
+    #[test]
+    fn limit_order_fills_on_the_next_bar() {
+        // Same order, but bar 1 does trade at 90: the fill is legitimate now.
+        let data = Arc::from_iter(vec![
+            bar(100.0, 110.0, 90.0, 105.0, 0),
+            bar(95.0, 105.0, 89.0, 100.0, 1),
+        ]);
+        let mut bt = Backtest::new(data, 1000.0, None).unwrap();
+
+        bt.run(|bt, candle| {
+            if candle.high() == 110.0 {
+                let order = Order::from((OrderType::Limit(candle.low()), 1.0, OrderSide::Buy));
+                bt.place_order(candle, order)?;
+            }
+            Ok(())
+        })
+        .unwrap();
+
+        assert_eq!(bt.positions().count(), 1);
+        assert_eq!(bt.balance(), 910.0); // 1000 - 90
+        // cash 910 + the position marked at bar 1's close (90 + 10)
+        assert_eq!(bt.total_balance(), 1010.0);
+    }
+
+    #[cfg(feature = "metrics")]
+    #[test]
+    fn equity_is_sampled_once_per_bar() {
+        use crate::metrics::Event;
+
+        let data = Arc::from_iter((0..5).map(|i| bar(100.0, 100.0, 100.0, 100.0, i)).collect::<Vec<_>>());
+        let mut bt = Backtest::new(data, 1000.0, None).unwrap();
+        bt.run(|_, _| Ok(())).unwrap();
+
+        let marks = bt
+            .events()
+            .filter(|event| matches!(event, Event::WalletUpdate { .. }))
+            .count();
+        assert_eq!(marks, 5); // one per bar, not one per trade action
     }
 
     struct TestAggregator;

@@ -40,10 +40,10 @@
 //!
 //! | Metric               | Description                                            |
 //! |----------------------|--------------------------------------------------------|
-//! | **Max Drawdown**     | Largest peak-to-trough decline in account balance (%). |
-//! | **Profit Factor**    | Ratio of gross profits to gross losses.                |
-//! | **Sharpe Ratio**     | Risk-adjusted return (higher = better).                |
-//! | **Win Rate**         | Percentage of winning trades.                          |
+//! | **Max Drawdown**     | Largest peak-to-trough decline in account equity (%).   |
+//! | **Profit Factor**    | Ratio of gross profits to gross losses, net of fees.    |
+//! | **Sharpe Ratio**     | Annualised per-bar return over its deviation.           |
+//! | **Win Rate**         | Percentage of profitable trades, net of fees.           |
 //!
 //! ### 4. **Optimization Tools**
 //!
@@ -61,7 +61,7 @@
 //! ### 2. Run a Simple Backtest:
 //! ```rust
 //! use std::sync::Arc;
-//! 
+//!
 //! use bts_rs::prelude::*;
 //! use chrono::{DateTime, Duration};
 //!
@@ -107,12 +107,13 @@
 //! === Backtest Metrics ===
 //! Initial Balance: 10000.00
 //! Final Balance: 10018.00
-//! Profit & Loss (P&L): 0.00
+//! Final Equity: 10018.00
+//! Profit & Loss (P&L): 18.00
 //! Fees paid: 0.00
-//! 
+//!
 //! Max Drawdown: 0.20%
 //! Profit Factor: 2.00
-//! Sharpe Ratio: 1.50
+//! Sharpe Ratio (annualised, risk-free rate = 0.0): 1.50
 //! Win Rate: 100.00%
 //! ```
 //!
@@ -141,7 +142,7 @@
 //! Example:
 //! ```rust
 //! use std::sync::Arc;
-//! 
+//!
 //! use bts_rs::prelude::*;
 //! use chrono::{DateTime, Duration};
 //!
@@ -156,10 +157,10 @@
 //!     .close_time(DateTime::default() + Duration::days(1))
 //!     .build()
 //!     .unwrap();
-//! 
+//!
 //! // Initialize backtest with \$10,000
 //! let mut backtest = Backtest::new(Arc::from_iter(vec![candle]), 10_000.0, None).unwrap();
-//! 
+//!
 //! // Execute a market buy order
 //! backtest
 //!     .run(|bt, candle| {
