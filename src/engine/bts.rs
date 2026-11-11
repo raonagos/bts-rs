@@ -224,9 +224,11 @@ impl Backtest {
     ///
     /// ### Arguments
     /// * `order` - Reference to the order to delete.
+    /// * `force_remove` - Retained for source compatibility. Deleting an order
+    ///   always removes it from the pool.
     ///
     /// ### Returns
-    /// Ok if successful, or an error.
+    /// Ok if successful, or an error if the order is no longer pending.
     ///
     /// ### Example
     /// ```rust
@@ -250,18 +252,22 @@ impl Backtest {
     /// let mut bts = Backtest::new(Arc::from_iter(vec![candle]), 1000.0, None).unwrap();
     /// let order = Order::from((OrderType::Limit(99.0), 1.0, OrderSide::Sell));
     /// bts.place_order(&candle, order).unwrap();
-    /// // if you call this function, always put `true` to delete
     /// bts.delete_order(&candle, &order, true).unwrap();
     /// ```
-    pub fn delete_order(&mut self, _candle: &Candle, order: &Order, force_remove: bool) -> Result<()> {
-        if force_remove {
-            let order_idx = self
-                .orders
-                .iter()
-                .position(|o| o == order)
-                .ok_or(Error::OrderNotFound)?;
-            self.orders.remove(order_idx).ok_or(Error::RemoveOrder)?;
-        }
+    pub fn delete_order(&mut self, candle: &Candle, order: &Order, force_remove: bool) -> Result<()> {
+        let _ = force_remove;
+        let order_idx = self
+            .orders
+            .iter()
+            .position(|o| o == order)
+            .ok_or(Error::OrderNotFound)?;
+        self.orders.remove(order_idx).ok_or(Error::RemoveOrder)?;
+        self.release_order(candle, order)
+    }
+
+    /// Releases the funds locked by an order that has already been removed from
+    /// the pending-order pool.
+    fn release_order(&mut self, _candle: &Candle, order: &Order) -> Result<()> {
         self.wallet.unlock(order.cost()?)?;
         #[cfg(feature = "metrics")]
         self.events.push(Event::DelOrder(_candle.open_time(), *order));
@@ -292,10 +298,13 @@ impl Backtest {
     /// ### Arguments
     /// * `position` - Reference to the position to close.
     /// * `exit_price` - The price at which to close the position.
-    /// * `force_remove` - If true, removes the position without checking conditions.
+    /// * `force_remove` - Retained for source compatibility. Closing a position
+    ///   always removes it from the pool; the engine no longer needs a separate
+    ///   removal flag.
     ///
     /// ### Returns
-    /// The profit/loss from closing the position, or an error.
+    /// The realised profit/loss from closing the position, before exit fees, or
+    /// an error if the position is not open.
     ///
     /// ### Example
     /// ```rust
@@ -323,7 +332,6 @@ impl Backtest {
     ///   
     ///   let last_position = _bts.positions().last().cloned();
     ///   if let Some(position) = last_position {
-    ///     // if you call this function, always put `true` to delete
     ///     _bts.close_position(candle, &position, 110.0, true).unwrap();
     ///   }
     ///
@@ -332,42 +340,61 @@ impl Backtest {
     /// ```
     pub fn close_position(
         &mut self,
-        _candle: &Candle,
+        candle: &Candle,
         position: &Position,
         exit_price: f64,
         force_remove: bool,
     ) -> Result<f64> {
+        let _ = force_remove;
         if exit_price <= 0.0 || !exit_price.is_finite() {
             return Err(Error::ExitPrice(exit_price));
         }
-        if force_remove {
-            let pos_idx = self
-                .positions
-                .iter()
-                .position(|p| p == position)
-                .ok_or(Error::PositionNotFound)?;
-            self.positions.remove(pos_idx).ok_or(Error::RemovePosition)?;
-        }
+        let pos_idx = self
+            .positions
+            .iter()
+            .position(|p| p == position)
+            .ok_or(Error::PositionNotFound)?;
+        self.positions.remove(pos_idx).ok_or(Error::RemovePosition)?;
+        self.settle_position(candle, position, exit_price)
+    }
+
+    /// Applies the accounting of a closed position that has already been removed
+    /// from the open-position pool.
+    fn settle_position(&mut self, candle: &Candle, position: &Position, exit_price: f64) -> Result<f64> {
         // Calculate profit/loss and update wallet
         let pnl = position.estimate_pnl(exit_price)?;
-        let total_amount = pnl + position.cost()?;
-        self.wallet.add(total_amount)?;
-        // the position leaves the book at its exit value; the cash arrived instead
-        self.wallet.sub_positions_value(total_amount);
-        // drop this position's last mark from the aggregate, *not* its notional
-        self.wallet.sub_pnl(pnl);
+        self.wallet.add(pnl + position.cost()?)?;
+
+        // Rebuild the aggregate book from the positions that are still open,
+        // marked at this bar's close. Subtracting the exit proceeds from
+        // `positions_value` would double-count the move between the last mark
+        // and the exit price.
+        let mark = candle.close();
+        let mut total_unrealized = 0.0;
+        let mut total_value = 0.0;
+        for open in &self.positions {
+            let open_pnl = open.estimate_pnl(mark)?;
+            total_unrealized += open_pnl;
+            total_value += open.cost()? + open_pnl;
+        }
+        self.wallet.set_unrealized_pnl(total_unrealized);
+        self.wallet.set_positions_value(total_value);
+
         if let Some((market_fee, limit_fee)) = self.market_fees {
+            // The exit fee is charged on the notional actually traded on exit,
+            // not on the entry notional.
+            let exit_notional = exit_price * position.quantity();
             if position.is_market_type() {
-                self.wallet.sub_fees(position.cost()? * market_fee)?;
+                self.wallet.sub_fees(exit_notional * market_fee)?;
             } else {
-                self.wallet.sub_fees(position.cost()? * limit_fee)?;
+                self.wallet.sub_fees(exit_notional * limit_fee)?;
             };
         }
         #[cfg(feature = "metrics")]
         {
             let mut _position = *position;
             _position.set_exit_price(exit_price)?;
-            self.events.push(Event::DelPosition(_candle.open_time(), _position));
+            self.events.push(Event::DelPosition(candle.open_time(), _position));
         }
         Ok(pnl)
     }
@@ -404,7 +431,7 @@ impl Backtest {
     /// ```
     pub fn close_all_positions(&mut self, candle: &Candle, exit_price: f64) -> Result<()> {
         while let Some(position) = self.positions.pop_front() {
-            self.close_position(candle, &position, exit_price, false)?;
+            self.settle_position(candle, &position, exit_price)?;
         }
         Ok(())
     }
@@ -417,9 +444,9 @@ impl Backtest {
             if price >= candle.low() && price <= candle.high() {
                 self.open_position(candle, Position::from(order))?;
             } else {
-                //? if order is market type and does not between `high` and `low`, delete
+                // A market order that this candle did not trade is cancelled.
                 if order.is_market_type() {
-                    self.delete_order(candle, &order, false)?;
+                    self.release_order(candle, &order)?;
                 } else {
                     orders.push_back(order);
                 }
@@ -514,7 +541,7 @@ impl Backtest {
 
             match should_close {
                 Some(exit_price) => {
-                    self.close_position(candle, &position, exit_price, false)?;
+                    self.settle_position(candle, &position, exit_price)?;
                 }
                 None => positions.push_back(position),
             }
@@ -666,7 +693,7 @@ impl Backtest {
 
         let candles = Arc::clone(&self.data);
         for candle in candles.iter() {
-            for (_, deque) in current_candles.iter_mut() {
+            for deque in current_candles.values_mut() {
                 deque.push_back(candle);
             }
 
@@ -936,9 +963,9 @@ mod tests {
             bt.execute_positions(&candle).unwrap(); // close = 120, take profit
 
             assert!(bt.positions.is_empty());
-            assert_eq!(bt.balance(), 1018.0); // balance = 1020 - (1 * 2) (fees)
-            assert_eq!(bt.total_balance(), 1018.0);
-            assert_eq!(bt.free_balance().unwrap(), 1018.0);
+            assert_eq!(bt.balance(), 1017.8); // 1020 - 1.0 entry fee - 1.2 exit fee
+            assert_eq!(bt.total_balance(), 1017.8);
+            assert_eq!(bt.free_balance().unwrap(), 1017.8);
         }
     }
 
@@ -973,9 +1000,9 @@ mod tests {
         bt.execute_positions(&candle).unwrap(); // close = 120, take profit
 
         assert!(bt.positions.is_empty());
-        assert_eq!(bt.balance(), 1018.0); // balance = 1020 - (1 * 2) (fees)
-        assert_eq!(bt.total_balance(), 1018.0);
-        assert_eq!(bt.free_balance().unwrap(), 1018.0);
+        assert_eq!(bt.balance(), 1017.8); // 1020 - 1.0 entry fee - 1.2 exit fee
+        assert_eq!(bt.total_balance(), 1017.8);
+        assert_eq!(bt.free_balance().unwrap(), 1017.8);
     }
 
     #[test]
@@ -1395,6 +1422,48 @@ mod tests {
         fn factors(&self) -> &[usize] {
             &[1, 2]
         }
+    }
+
+    #[test]
+    fn delete_order_removes_the_order_even_without_force_remove() {
+        use crate::errors::Error;
+
+        let data = get_data();
+        let mut bt = Backtest::new(data, 1000.0, None).unwrap();
+        let candle = bt.next().unwrap();
+        let order: Order = (OrderType::Limit(100.0), 1.0, OrderSide::Buy).into();
+        bt.place_order(&candle, order).unwrap();
+
+        bt.delete_order(&candle, &order, false).unwrap();
+        assert!(bt.orders().next().is_none());
+        assert_eq!(bt.free_balance().unwrap(), 1000.0);
+        assert!(matches!(
+            bt.delete_order(&candle, &order, false),
+            Err(Error::OrderNotFound)
+        ));
+    }
+
+    #[test]
+    fn close_position_removes_the_position_even_without_force_remove() {
+        use crate::errors::Error;
+
+        let data = get_long_data();
+        let mut bt = Backtest::new(data, 1000.0, None).unwrap();
+        let candle = bt.next().unwrap();
+        let order: Order = (OrderType::Market(100.0), 1.0, OrderSide::Buy).into();
+        bt.place_order(&candle, order).unwrap();
+        bt.execute_orders(&candle).unwrap();
+
+        let position = *bt.positions().next().unwrap();
+        let pnl = bt.close_position(&candle, &position, 110.0, false).unwrap();
+
+        assert_eq!(pnl, 10.0);
+        assert!(bt.positions().next().is_none());
+        assert_eq!(bt.total_balance(), 1010.0);
+        assert!(matches!(
+            bt.close_position(&candle, &position, 110.0, false),
+            Err(Error::PositionNotFound)
+        ));
     }
 
     #[test]

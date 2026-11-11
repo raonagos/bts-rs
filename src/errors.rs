@@ -34,7 +34,23 @@ pub enum Error {
     #[error("Volume cannot be negative (got: {0})")]
     NegativeVolume(f64),
 
-    /// Open time and close time are not in valid order (open time < close time).
+    /// The bid-side volume is outside `0..=volume`.
+    ///
+    /// ### Arguments
+    /// * `0` - The invalid bid-side volume.
+    /// * `1` - The total volume.
+    #[error("Bid volume must be between 0 and the total volume (got: {0}, volume: {1})")]
+    InvalidBidVolume(f64, f64),
+
+    /// The open time is after the close time.
+    #[error("Invalid time order: open={0}, close={1}")]
+    InvalidTimes(DateTime<Utc>, DateTime<Utc>),
+
+    /// The open time is after the close time.
+    ///
+    /// Deprecated spelling of [`InvalidTimes`](Self::InvalidTimes); kept for
+    /// source compatibility with earlier releases.
+    #[deprecated(since = "1.1.0", note = "use Error::InvalidTimes")]
     #[error("Invalid time order: open={0}, close={1}")]
     InvalideTimes(DateTime<Utc>, DateTime<Utc>),
 
@@ -166,6 +182,14 @@ impl<'de> serde::Deserialize<'de> for Error {
             NegativeVolume {
                 volume: f64,
             },
+            InvalidBidVolume {
+                bid: f64,
+                volume: f64,
+            },
+            InvalidTimes {
+                open: i64,
+                close: i64,
+            },
             InvalideTimes {
                 open: i64,
                 close: i64,
@@ -209,23 +233,36 @@ impl<'de> serde::Deserialize<'de> for Error {
             },
         }
 
-        // Désérialiser en utilisant la structure intermédiaire
+        // Deserialize through the intermediate representation.
         let wrapper = ErrorWrapper::deserialize(deserializer)?;
 
-        // Convertir en Error
+        // Convert to `Error`.
         Ok(match wrapper {
             ErrorWrapper::CandleDataEmpty => Error::CandleDataEmpty,
             ErrorWrapper::CandleNotFound => Error::CandleNotFound,
             ErrorWrapper::InvalidFactor => Error::InvalidFactor,
-            ErrorWrapper::MissingField { field } => Error::MissingField(Box::leak(field.into_boxed_str())),
+            ErrorWrapper::MissingField { field } => match field.as_str() {
+                // Keep the `&'static str` variant without leaking memory: map the
+                // known builder fields back to their static names and fall back to
+                // `Msg` for anything else.
+                "open" => Error::MissingField("open"),
+                "high" => Error::MissingField("high"),
+                "low" => Error::MissingField("low"),
+                "close" => Error::MissingField("close"),
+                "volume" => Error::MissingField("volume"),
+                "open time" => Error::MissingField("open time"),
+                "close time" => Error::MissingField("close time"),
+                other => Error::Msg(format!("Missing required field: {other}")),
+            },
             ErrorWrapper::InvalidPriceOrder { open, low, high, close } => {
                 Error::InvalidPriceOrder(open, low, high, close)
             }
             ErrorWrapper::NegativeVolume { volume } => Error::NegativeVolume(volume),
-            ErrorWrapper::InvalideTimes { open, close } => {
+            ErrorWrapper::InvalidBidVolume { bid, volume } => Error::InvalidBidVolume(bid, volume),
+            ErrorWrapper::InvalidTimes { open, close } | ErrorWrapper::InvalideTimes { open, close } => {
                 let open_dt = DateTime::from_timestamp_millis(open).unwrap_or(Utc::now());
                 let close_dt = DateTime::from_timestamp_millis(close).unwrap_or(Utc::now());
-                Error::InvalideTimes(open_dt, close_dt)
+                Error::InvalidTimes(open_dt, close_dt)
             }
             ErrorWrapper::NegZeroBalance { balance } => Error::NegZeroBalance(balance),
             ErrorWrapper::InsufficientFunds { required, available } => Error::InsufficientFunds(required, available),

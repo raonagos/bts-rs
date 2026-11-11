@@ -1,6 +1,6 @@
 //! # Parallel EMA and MACD Parameters Optimization
 //!
-//! This module implements a **parallel opt** to find optimal
+//! This example implements a **parallel optimization** to find optimal
 //! EMA and MACD parameters for trading strategies using multi-threading.
 mod utils;
 
@@ -64,7 +64,7 @@ fn main() -> Result<(), Box<dyn StdError>> {
             }
             Ok(())
         },
-        |b| Some(b.balance()),
+        |b| Some(b.total_balance()),
     )?;
 
     let mut result_with_sum = result

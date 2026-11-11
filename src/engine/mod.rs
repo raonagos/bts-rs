@@ -17,4 +17,4 @@ pub use bts::*;
 pub use candle::*;
 pub use order::*;
 pub use position::*;
-pub(crate) use wallet::*;
+pub use wallet::*;

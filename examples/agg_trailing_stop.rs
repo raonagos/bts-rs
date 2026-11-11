@@ -2,8 +2,8 @@ mod utils;
 
 use std::{error::Error as StdError, sync::Arc};
 
-use bts_rs::prelude::*;
 use bts_rs::errors::Error;
+use bts_rs::prelude::*;
 use ta::{indicators::*, *};
 
 fn main() -> Result<(), Box<dyn StdError>> {
@@ -30,10 +30,10 @@ fn main() -> Result<(), Box<dyn StdError>> {
         let _candle_eight = candles.get(2);
 
         if let Some(_c) = _candle_four {
-            // first candle appears at the 5rd iteration
+            // first candle appears at the 5th iteration
         }
         if let Some(_c) = _candle_eight {
-            // first candle appears at the 9rd iteration
+            // first candle appears at the 9th iteration
         }
 
         let close = candle_one.close();
@@ -66,11 +66,9 @@ fn main() -> Result<(), Box<dyn StdError>> {
         let n = candles.len();
         println!("trades {n}");
 
-        let new_balance = bts.balance();
-        let t_balance = bts.total_balance();
+        let new_balance = bts.total_balance();
         let new_balance_perf = initial_balance.change(new_balance);
-        let t_balance_perf = initial_balance.change(t_balance);
-        println!("performance {new_balance:.2}/{t_balance:.2} ({new_balance_perf:.2}%/{t_balance_perf:.2}%)");
+        println!("performance {new_balance:.2} ({new_balance_perf:+.2}%)");
 
         let buy_and_hold = (initial_balance / first_price) * last_price;
         let buy_and_hold_perf = first_price.change(last_price);

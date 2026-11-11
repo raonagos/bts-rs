@@ -1,13 +1,15 @@
 [package]
 name = "bts-rs"
-version = "1.0.11"
+version = "1.1.0"
 edition = "2024"
-description = "Backtest your trading strategy."
+rust-version = "1.88"
+description = "Backtest trading strategies on OHLCV candlestick data."
 authors = ["tetuaoro <65575727+tetuaoro@users.noreply.github.com>"]
 documentation = "https://docs.rs/bts-rs"
 repository = "https://github.com/raonagos/bts-rs"
 license = "MIT"
 readme = "README.md"
+homepage = "https://github.com/raonagos/bts-rs"
 keywords = [
     "trading",
     "finance",
@@ -40,7 +42,7 @@ serde = ["chrono/serde", "dep:serde"]
 wasm = ["rayon/web_spin_lock", "getrandom/wasm_js"]
 
 [package.metadata.docs.rs]
-features = ["metrics", "draws", "optimizer"]
+all-features = true
 
 [dev-dependencies]
 ta = "0.5.0"

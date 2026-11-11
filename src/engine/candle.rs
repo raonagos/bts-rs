@@ -2,11 +2,12 @@ use crate::errors::{Error, Result};
 
 use chrono::{DateTime, Utc};
 
-/// Represents a financial candle (or candlestick) with open, high, low, close, volume, and bid/ask data.
+/// Represents a financial candle (or candlestick): OHLC prices, total volume, and
+/// the volume traded on the bid side.
 ///
-/// A candle is a fundamental data structure in financial markets, representing price movements
-/// over a specific time period. It includes the opening price, highest price, lowest price,
-/// closing price, trading volume, and bid/ask spread information.
+/// `volume` is the total volume over the candle's period; `bid` is the part of it
+/// that traded on the bid side. The ask-side volume is the remainder,
+/// `volume - bid`, exposed by [`Candle::ask`].
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(test, derive(PartialEq))]
 #[derive(Debug, Clone, Copy)]
@@ -47,15 +48,29 @@ impl Candle {
         self.volume
     }
 
-    /// Returns the bid price of the candle.
+    /// Returns the volume traded on the bid side during the candle.
     pub fn bid(&self) -> f64 {
         self.bid
     }
 
-    /// Returns the ask price of the candle, calculated as volume minus bid.
+    /// Returns the volume traded on the bid side during the candle.
     ///
-    /// Note: This is a simplified calculation and may not reflect the actual market ask price.
+    /// Alias of [`bid`](Self::bid), with the unit in the name.
+    pub fn bid_volume(&self) -> f64 {
+        self.bid
+    }
+
+    /// Returns the volume traded on the ask side during the candle.
+    ///
+    /// This is `volume() - bid()`. It is a volume, not a price.
     pub fn ask(&self) -> f64 {
+        self.volume - self.bid
+    }
+
+    /// Returns the volume traded on the ask side during the candle.
+    ///
+    /// Alias of [`ask`](Self::ask), with the unit in the name.
+    pub fn ask_volume(&self) -> f64 {
         self.volume - self.bid
     }
 
@@ -91,6 +106,12 @@ pub struct CandleBuilder {
     bid: Option<f64>,
     open_time: Option<DateTime<Utc>>,
     close_time: Option<DateTime<Utc>>,
+}
+
+impl Default for CandleBuilder {
+    fn default() -> Self {
+        Self::builder()
+    }
 }
 
 impl CandleBuilder {
@@ -138,7 +159,7 @@ impl CandleBuilder {
         self
     }
 
-    /// Sets the bid price.
+    /// Sets the bid-side volume.
     pub fn bid(mut self, bid: f64) -> Self {
         self.bid = Some(bid);
         self
@@ -159,9 +180,13 @@ impl CandleBuilder {
     ///
     /// # Errors
     /// Returns an error if:
-    /// - Any required field is missing (open, high, low, close, volume)
-    /// - Prices are not valid (open ≤ low ≤ high ≤ close)
+    /// - Any required field is missing (`open`, `high`, `low`, `close`, `volume`,
+    ///   `open_time`, `close_time`)
+    /// - A price is negative, or `low` is not the minimum and `high` the maximum
+    ///   of the four prices
     /// - Volume is negative
+    /// - The bid-side volume is negative or greater than the total volume
+    /// - `open_time` is after `close_time`
     pub fn build(self) -> Result<Candle> {
         // Check required fields
         let open = self.open.ok_or(Error::MissingField("open"))?;
@@ -182,9 +207,14 @@ impl CandleBuilder {
             return Err(Error::NegativeVolume(volume));
         }
 
-        // Valideta times
+        let bid = self.bid.unwrap_or(0.0);
+        if !(0.0..=volume).contains(&bid) {
+            return Err(Error::InvalidBidVolume(bid, volume));
+        }
+
+        // Validate times
         if open_time > close_time {
-            return Err(Error::InvalideTimes(open_time, close_time));
+            return Err(Error::InvalidTimes(open_time, close_time));
         }
 
         Ok(Candle {
@@ -193,7 +223,7 @@ impl CandleBuilder {
             low,
             close,
             volume,
-            bid: self.bid.unwrap_or(0.0), // 0.0 if not provided
+            bid, // 0.0 if not provided
             open_time,
             close_time,
         })
@@ -222,6 +252,8 @@ fn candle_accessors() {
     assert_eq!(candle.volume(), 1000.0);
     assert_eq!(candle.bid(), 104.5);
     assert_eq!(candle.ask(), 1000.0 - 104.5); // volume - bid
+    assert_eq!(candle.bid_volume(), 104.5);
+    assert_eq!(candle.ask_volume(), 1000.0 - 104.5);
     assert!(candle.open_time() < candle.close_time())
 }
 
@@ -514,4 +546,51 @@ fn candle_ask_calculation() {
         .build()
         .unwrap();
     assert_eq!(candle.ask(), 1000.0 - 0.0);
+}
+
+#[cfg(test)]
+#[test]
+fn candle_builder_invalid_bid_volume() {
+    let open_time = DateTime::from_timestamp_secs(1515151515).unwrap();
+    let close_time = DateTime::from_timestamp_secs(1515151516).unwrap();
+
+    let result = CandleBuilder::builder()
+        .open(100.0)
+        .high(110.0)
+        .low(95.0)
+        .close(105.0)
+        .volume(1000.0)
+        .bid(-1.0)
+        .open_time(open_time)
+        .close_time(close_time)
+        .build();
+    assert!(matches!(result, Err(Error::InvalidBidVolume(-1.0, 1000.0))));
+
+    let result = CandleBuilder::builder()
+        .open(100.0)
+        .high(110.0)
+        .low(95.0)
+        .close(105.0)
+        .volume(1000.0)
+        .bid(1000.1)
+        .open_time(open_time)
+        .close_time(close_time)
+        .build();
+    assert!(matches!(result, Err(Error::InvalidBidVolume(_, _))));
+}
+
+#[cfg(test)]
+#[test]
+fn candle_builder_invalid_time_order() {
+    let result = CandleBuilder::builder()
+        .open(100.0)
+        .high(110.0)
+        .low(95.0)
+        .close(105.0)
+        .volume(1000.0)
+        .open_time(DateTime::from_timestamp_secs(1515151516).unwrap())
+        .close_time(DateTime::from_timestamp_secs(1515151515).unwrap())
+        .build();
+
+    assert!(matches!(result, Err(Error::InvalidTimes(_, _))));
 }

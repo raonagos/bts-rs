@@ -1,187 +1,158 @@
 # Execution model
 
-**Status:** target model for the System One integration, 2026-11-10.
-**Code:** corrected metrics are on `fix/metrics-truth` (PR #21); the event-tape
-and L2/ledger pieces are planned.
-
-This document is the correctness contract for `bts-rs` as the execution layer
-of System One. It describes what a fill is, what equity is, and which tests
-must stay green.
+This document describes how `bts-rs` turns a sequence of candles into fills,
+cash, equity, and metrics. It is the reference for the accounting rules and for
+the invariants covered by the test suite. It describes the **current bar-level
+implementation**; extensions such as order-book input are listed under
+[Limitations](#limitations).
 
 ## 1. Event loop
 
-The engine consumes one event at a time, in exchange-time order:
+`Backtest::run` consumes one candle at a time, in the order of the input slice:
 
 ```text
-1. receive e_t
-2. mark open positions at e_t's mark price
-3. charge funding if e_t is a funding stamp
-4. execute orders that became eligible at e_t
-5. emit the per-event equity mark
-6. ask the strategy for a decision at e_t
-7. enqueue the resulting orders for the next eligible event
+for each candle c_t:
+    1. execute pending orders against c_t's range
+    2. evaluate exit rules on positions opened before c_t
+    3. mark every open position at c_t's close
+    4. record the equity sample for c_t (metrics feature)
+    5. call the strategy with c_t
 ```
 
-A strategy sees the event after the fills from that event are applied. An order
-created at step 6 is **not** eligible at `e_t`; it becomes eligible at the next
-event. This is the no-lookahead invariant.
+An order placed in step 5 is not present during step 1 of `c_t`; it becomes
+eligible on `c_{t+1}`. `Backtest::close_position`, by contrast, is an explicit
+immediate action: it is applied when the strategy calls it.
 
-For a bar-level caller, one candle-close event is one event. The same rule
-applies: a market order decided on the close fills at the next event, not at
-the close that produced the decision.
+The engine does not reorder candles and does not look at future candles.
 
-## 2. Mark price
+## 2. Fills
 
-The mark is the price used to value open positions:
+A pending order is filled when its entry price lies inside the candle's
+`low..=high` range:
 
-- if a trade occurred at the event, the last trade price;
-- else the mid of the top of book;
-- else the previous mark, with a stale flag.
+```text
+if low <= order.price <= high:
+    fill at order.price
+```
 
-The mark is for equity, not for fills. A fill uses the eligible event's
-executable price (best ask for a buy, best bid for a sell). The two are allowed
-to differ; the difference is the spread/slippage, reported separately.
+The fill price is the price carried by the order, not the candle open, close,
+or a volume-weighted price. Consequently:
 
-## 3. Orders
+- a market order that is outside the next candle's range is cancelled;
+- a limit order remains pending until a candle range contains its price;
+- all fills are complete; there are no partial fills;
+- there is no slippage, market impact, queue position, or latency model.
 
-### 3.1 Types
+Market and limit orders differ in how they are cancelled and which fee rate they
+pay, not in the fill rule above.
 
-| type | status | fill rule |
+Exit rules are evaluated on the bars after the position was opened:
+
+| Rule | Long exit | Short exit |
 | --- | --- | --- |
-| market | required | best bid/ask for the visible size; FOK beyond it on real data |
-| limit | research | trade-through only; no fill on the placing event or its range |
-| stop / take-profit | not in v1 | explicit policy action or pre-registered price rule |
+| `TakeProfitAndStopLoss(tp, sl)` | `tp` if `tp <= high`, else `sl` if `sl >= low` | `tp` if `tp >= low`, else `sl` if `sl <= high` |
+| `TrailingStop(price, percent)` | `price * (1 - percent/100)` if `>= low`; otherwise trail `price` up to `high` | `price * (1 + percent/100)` if `<= high`; otherwise trail `price` down to `low` |
 
-A limit order may not fill on the event that placed it, and may not fill on the
-range of that event. A stop placed after reading a high/low may not fill on the
-same bar.
+When a take-profit and a stop-loss could both trigger in the same candle, the
+take-profit is tested first. A single OHLC bar does not reveal the intrabar
+path, so this ordering is a documented convention, not a claim about the true
+sequence of trades.
 
-### 3.2 Intent
-
-```text
-side        Buy | Sell
-intent      Open | Close | Reduce | Reverse
-size        signed target delta, in equity units
-position_id optional; reduce-only when set
-```
-
-Positions are net. A reverse is one net order whose delta is
-`target - current`; it may be filled as one net trade or two child fills, but
-the fee is charged on the full `|delta|`.
-
-### 3.3 Real versus synthetic fills
-
-Real historical data has no full ladder:
-
-- `bookTicker`: one level per side per update;
-- `bookDepth`: aggregate depth at ±1..5% every ~30 s;
-- `aggTrades`: event-level trades.
-
-The default real fill is therefore:
+## 3. Account model
 
 ```text
-buy:  fill at ask if size <= ask_size, else no fill (FOK)
-sell: fill at bid if size <= bid_size, else no fill (FOK)
-fee  = fee_bps * notional
+cash_at_open   = cash - order.cost
+position_value = order.cost + unrealized_pnl
+unrealized_pnl = (mark - entry) * quantity       for a long
+               = (entry - mark) * quantity       for a short
+equity         = cash + sum(position_value)
+total_pnl      = equity - initial_balance
 ```
 
-No hidden liquidity. No extrapolated ladder. A policy that wants a larger
-position must slice across events, and the slicing rule is reported.
+The accessors make the distinction explicit:
 
-Synthetic data may carry a full ladder. A full-ladder walk is allowed only when
-the tape actually has one, and the result is labelled a **synthetic ablation**.
-It is never presented as a real-data result.
+- `Wallet::balance()` is **cash**, the part of the account that is not invested.
+- `Wallet::positions_value()` is the mark-to-market value of the open positions.
+- `Wallet::total_balance()` and `Wallet::equity()` are `cash + positions_value`.
+- `Wallet::unrealized_pnl()` is the sum of the open positions' unrealized P&L.
 
-A depth-band stress model may be used for robustness:
+Opening a position moves cash into `positions_value`; it does not change
+equity by itself. Closing a position moves the position's exit value back to
+cash and removes it from `positions_value`. Marking is done once per bar, at the
+candle close, for every open position.
+
+### Fees
+
+`Backtest::new` accepts `market_fees: Option<(f64, f64)>` as **percentages**.
+The engine converts them to fractions internally and charges:
 
 ```text
-impact_bps = spread_bps/2 + k * size / depth_at_1pct
+fee = notional * rate
 ```
 
-`k` is fixed before the run. The stress result is reported beside the default,
-not instead of it.
+on entry and on exit, where `notional = price * quantity`. Market orders use
+the first rate and limit orders the second. Fees reduce cash and are
+accumulated in `Wallet::fees_paid()`; they are never silently folded into the
+fill price.
 
-## 4. Wallet and equity
+There is no funding, borrow, or financing charge in the current engine.
 
-```text
-cash          = initial + realised_pnl - fees - funding
-positions     = sum(mark_value(position))
-unrealised    = sum((mark - entry) * size * side)
-equity        = cash + positions
-```
+## 4. Metrics
 
-- `balance()` is cash. It moves when a position opens; it is not account value.
-- `total_balance()` / `equity()` is `cash + positions_value`; this is the only
-  number used by metrics and by `trad`.
-- At the end of a run, open positions are liquidated at the last mark and pay
-  their exit fee. `final_equity` is after that liquidation.
-- Funding is charged to cash at each stamp: a long pays a positive rate, a
-  short receives it. The signed series is reported.
+With the `metrics` feature, every candle produces one `Event::WalletUpdate`.
+The sequence of those events is the equity curve, and all metrics are computed
+from it:
 
-## 5. Metrics
-
-Computed from the per-event equity curve, net of fees and funding:
-
-| metric | definition |
+| Metric | Definition |
 | --- | --- |
-| `pnl` | `final_equity - initial_balance` |
-| `fees` | cumulative fees paid |
-| `funding` | cumulative funding paid (positive = cost) |
-| `max_drawdown` | worst peak-to-trough of the equity curve |
-| `profit_factor` | gross profit / gross loss on net trade P&L; 0 with no trades, `inf` only with gains and no losses |
-| `win_rate` | winning closed trades / closed trades, net of fees |
-| `sharpe` | per-event or per-bar equity returns, sample std, annualised with an explicit periods-per-year; 0 when undefined |
+| `pnl` | `final_equity - initial_balance`; fees included. |
+| `fees` | Cumulative fees paid. |
+| `max_drawdown` | Largest peak-to-trough decline of the equity curve, in percent. |
+| `profit_factor` | Sum of positive closed-trade P&L over the absolute sum of negative closed-trade P&L, each net of entry and exit fees. `0.0` with no trades; `inf` with gains and no losses. |
+| `win_rate` | Percentage of closed trades whose net P&L is strictly positive. |
+| `sharpe_ratio` | Mean per-bar equity return minus the per-bar risk-free rate, divided by the sample standard deviation of the returns, multiplied by `sqrt(bars_per_year)`. `0.0` when fewer than two returns exist or the deviation is zero. |
 
-Sharpe is a diagnostic. System One scores on final balance, `efficiency`,
-`capture`, and `gap` against the `trad` DP ceiling.
+By default the bars-per-year factor is inferred from the median spacing of the
+equity samples; `Metrics::with_periods_per_year` overrides it. A trade that
+ends exactly at break-even is not a win. An undefined ratio is reported as
+`0.0`, never as `NaN`.
 
-## 6. Invariants
+The `Display` implementation prints the final cash balance, the final equity,
+the P&L, the fees, and the four risk/return metrics.
 
-Tests, not comments:
+## 5. Invariants
 
-1. `equity == cash + positions_value` at every event.
-2. `pnl == final_equity - initial_balance`, including an open final position.
-3. Fees are monotone non-decreasing. Funding is signed and reported.
-4. A market order placed at `t` cannot fill at `t`.
-5. A limit placed at `t` cannot fill at `t` or on `t`'s range.
-6. A real fill price is the eligible event’s best bid/ask and its size does not
-   exceed the visible quote (FOK).
-7. A synthetic ladder fill never exceeds the visible ladder.
-8. A zero-trade run has Sharpe 0, PF 0, WR 0, drawdown 0.
-9. A flat run has `pnl = 0`, `fees = 0`, `final = initial`.
-10. The same position path with market fills gives the same final balance as
-    `trad::balance::balance` on the same prices, fees, and funding.
+The test suite asserts, among others:
 
-## 7. Events
+1. `equity == cash + positions_value` at every marked bar.
+2. `pnl == final_equity - initial_balance`, including a position still open at
+   the end of the run.
+3. Opening a position does not change equity; only fees and mark movements do.
+4. An order placed after seeing bar `t` cannot fill on bar `t`.
+5. A limit order placed on bar `t` cannot fill on bar `t`'s range.
+6. A zero-trade run reports `pnl = 0`, `max_drawdown = 0`, `profit_factor = 0`,
+   `win_rate = 0`, and a Sharpe ratio of `0`.
+7. `WalletUpdate` is emitted once per bar, not once per trade action.
+8. Fees are monotone non-decreasing and are charged on both sides of a trade.
 
-The corrected `Event::WalletUpdate` is emitted **once per event**, at the mark,
-and carries:
+## 6. Aggregated candles
 
-```text
-datetime, pnl, fees, free, locked, balance(equity)
-```
+`Backtest::run_with_aggregator` applies the same loop to a base candle and to
+aggregated candles built by an `Aggregation` implementation. Aggregated candles
+combine open/high/low/close/volume over a fixed number of base candles. The
+engine still executes orders against the base candle, so aggregation is a
+strategy input, not a second execution path.
 
-It is not emitted only on trade actions. A per-trade sample sees only the bars
-where something happened, so an intra-trade excursion is invisible and the open
-notional reads as a realised loss.
+## 7. Limitations
 
-## 8. Integration with `trad`
+- Bar-level input only. There is no tick, trade, or order-book tape.
+- No partial fills; a fill is all-or-nothing at the order price.
+- No slippage, market impact, queue position, latency, or funding model.
+- No short-selling borrow cost and no margin/liquidation model.
+- Intrabar ordering is unknown; the take-profit-first rule is a convention.
+- No exchange connectivity, credentials, or live order routing.
+- No built-in indicators; use an indicator crate inside the strategy closure.
 
-`trad` uses two paths:
-
-- **Fast path (DP labels and bulk scoring):** `balance::balance` and
-  `balance::max_balance` on a position path. Exact on the grid.
-- **Execution path (policy rollout):** `bts-rs`, event by event, with the same
-  fees, funding, and final liquidation.
-
-A parity test asserts the two paths agree on a market-order-only path. If they
-disagree, the execution contract is the source of truth for the fill and the DP
-is updated to match, or the discrepancy is reported as a bug.
-
-## 9. Non-goals
-
-- No exchange connectivity, keys, or live orders.
-- No hidden liquidity, queue-position optimism, or maker rebate assumptions.
-- No indicator library and no clock feature in the execution layer.
-- No “fill at the close the signal read” in the new path. The old close-fill
-  convention survives only in the archived `trad` numbers.
+These are explicit trade-offs of a compact, deterministic bar simulator. They
+are documented so that a result is never read as more precise than the input
+data allows.

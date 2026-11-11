@@ -1,6 +1,6 @@
 //! Module for visualizing backtest results and candle charts.
 //!
-//! It needs to enable `draws` feature to use it. Take a look at [trailing stop](https://github.com/raonagos/bts-rs/blob/master/examples/trailing_stop.rs#L70) for example.
+//! Enable the `draws` feature to use it. See the [trailing stop](https://github.com/raonagos/bts-rs/blob/master/examples/trailing_stop.rs) example.
 
 use crate::engine::{Backtest, Candle};
 use crate::errors::{Error, Result};
@@ -268,12 +268,16 @@ impl Draw {
             .collect::<Vec<_>>();
 
         #[cfg(not(feature = "metrics"))]
-        let (min_balance, max_balance) = (0.0, 0.0);
+        let (min_balance, max_balance) = (0.0, 1.0);
         #[cfg(feature = "metrics")]
-        let (min_balance, max_balance) = (
-            equity_curve.iter().map(|(_, b)| *b).fold(f64::INFINITY, f64::min),
-            equity_curve.iter().map(|(_, b)| *b).fold(f64::NEG_INFINITY, f64::max),
-        );
+        let (min_balance, max_balance) = if equity_curve.is_empty() {
+            (0.0, 1.0)
+        } else {
+            (
+                equity_curve.iter().map(|(_, b)| *b).fold(f64::INFINITY, f64::min),
+                equity_curve.iter().map(|(_, b)| *b).fold(f64::NEG_INFINITY, f64::max),
+            )
+        };
 
         let (top, bottom) = if self.options.show_volume { (0, 0) } else { (10, 10) };
         let drawing_area = drawing_area.margin(top, bottom, 70, 70);
@@ -348,27 +352,24 @@ impl Draw {
             let colors = [
                 BLUE, GREEN, RED, CYAN, MAGENTA, YELLOW, BLACK, ORANGE, PURPLE, PINK, LIME, TEAL,
             ];
-            let mut color_index = 0;
-
-            self.series.iter().for_each(|s| {
+            for (color_index, series) in self.series.iter().enumerate() {
                 let color = colors[color_index % colors.len()];
-                color_index += 1;
 
-                match s {
+                match series {
                     Series::Lines(data) => {
                         let lines =
                             LineSeries::new(data.iter().zip(&self.candles).map(|(s, c)| (c.open_time(), *s)), color);
-                        chart.draw_series(lines).expect("Draw line series");
+                        chart.draw_series(lines).map_err(|e| Error::Plotters(e.to_string()))?;
                     }
                     Series::Circles(data) => {
                         let circles = data
                             .iter()
                             .zip(&self.candles)
                             .map(|(s, c)| Circle::new((c.open_time(), *s), 2.0, color));
-                        chart.draw_series(circles).expect("Draw circle series");
+                        chart.draw_series(circles).map_err(|e| Error::Plotters(e.to_string()))?;
                     }
                 }
-            });
+            }
         }
 
         #[cfg(feature = "metrics")]
@@ -383,30 +384,22 @@ impl Draw {
                 .metrics
                 .events()
                 .filter_map(|e| match e {
-                    Event::AddPosition(date_time, position) => Some((date_time, position.entry_price())),
+                    Event::AddPosition(date_time, position) => {
+                        position.entry_price().ok().map(|price| (date_time, price))
+                    }
                     _ => None,
                 })
-                .map(|(datetime, price)| {
-                    Circle::new(
-                        (*datetime, price.expect("Invalid price").addpercent(5.0)),
-                        2,
-                        BLUE.filled(),
-                    )
-                });
+                .map(|(datetime, price)| Circle::new((*datetime, price.addpercent(5.0)), 2, BLUE.filled()));
             let closed_positions = self
                 .metrics
                 .events()
                 .filter_map(|e| match e {
-                    Event::DelPosition(date_time, position) => Some((date_time, position.entry_price())),
+                    Event::DelPosition(date_time, position) => {
+                        position.entry_price().ok().map(|price| (date_time, price))
+                    }
                     _ => None,
                 })
-                .map(|(datetime, price)| {
-                    Circle::new(
-                        (*datetime, price.expect("Invalid price").addpercent(5.0)),
-                        2,
-                        RED.filled(),
-                    )
-                });
+                .map(|(datetime, price)| Circle::new((*datetime, price.addpercent(5.0)), 2, RED.filled()));
 
             chart
                 .draw_series(opened_positions)
@@ -464,13 +457,14 @@ impl Draw {
         chart
             .draw_series(self.candles.iter().map(|c| {
                 let x = c.open_time();
+                let width = (c.close_time() - c.open_time()).max(Duration::seconds(1));
                 let volume = c.volume();
-                let color = if c.ask() >= c.bid() {
+                let color = if c.ask_volume() >= c.bid_volume() {
                     GREEN.mix(0.3)
                 } else {
                     RED.mix(0.3)
                 };
-                Rectangle::new([(x, 0.0), (x + Duration::days(1), volume)], color.filled())
+                Rectangle::new([(x, 0.0), (x + width, volume)], color.filled())
             }))
             .map(|_| ())
             .map_err(|e| Error::Plotters(e.to_string()))

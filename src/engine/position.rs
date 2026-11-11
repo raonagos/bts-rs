@@ -3,7 +3,7 @@ use crate::{errors::*, utils::random_id};
 
 /// Represents the side of a position (long or short).
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PositionSide {
     /// A long position, where the trader buys an asset with the expectation that its price will increase.
     Long,

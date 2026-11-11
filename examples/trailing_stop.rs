@@ -54,11 +54,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         let n = candles.len();
         println!("trades {n}");
 
-        let new_balance = bts.balance();
-        let t_balance = bts.total_balance();
+        let new_balance = bts.total_balance();
         let new_balance_perf = initial_balance.change(new_balance);
-        let t_balance_perf = initial_balance.change(t_balance);
-        println!("performance {new_balance:.2}/{t_balance:.2} ({new_balance_perf:.2}%/{t_balance_perf:.2}%)");
+        println!("performance {new_balance:.2} ({new_balance_perf:+.2}%)");
 
         let buy_and_hold = (initial_balance / first_price) * last_price;
         let buy_and_hold_perf = first_price.change(last_price);
